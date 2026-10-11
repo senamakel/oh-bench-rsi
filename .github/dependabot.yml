@@ -1,7 +1,9 @@
 version: 2
 updates:
+  # The memd adapter is the only Rust package this repository owns; the
+  # vendored submodules are bumped by hand (AGENTS.md, Vendored dependencies).
   - package-ecosystem: cargo
-    directory: /
+    directory: /adapters/lme2-memd
     schedule:
       interval: weekly
     ignore:

@@ -2,24 +2,26 @@
 
 ## Shipped
 
-- Repository scaffold: OpenHuman, tinyrsi and openhuman-benchmarks pinned as
-  submodules; `ohrsi` crate with validated campaign manifests and
-  `ohrsi check` / `ohrsi list`.
-- Two draft campaigns from the memory audit findings: `memory-recall-pack` and
-  `memory-temporal-recall`.
+- Submodules: OpenHuman, tinyrsi and openhuman-benchmarks, pinned.
+- LongMemEval-V2 (web, small tier) measurement: the `lme2-memd` TinyMemory adapter, the
+  official harness's `oh_tinymemory` backend, the frozen 75 dev / 150 test subset and the
+  ingest cache.
+- Baseline run (`run-02`): dev 0.320, test 0.160.
+- The loop as a tinyrsi loop folder, `loops/lme2-recall`, run by the `tinyrsi` binary
+  (ADR 0007). It replaced this repository's own epoch driver, gate, decision, swarm host
+  and spend gateway.
 
 ## Next
 
 See [`docs/plans/rsi-memory-loop.md`](docs/plans/rsi-memory-loop.md):
 
-1. `scripts/bench/memory-metric.sh` — run the frozen memory suite against a
-   candidate checkout and print `METRIC memory_accuracy=<value>`.
-2. Candidate checkouts: OpenHuman git worktrees under `runs/`.
-3. Link tinyrsi's script loop and drive one campaign end to end.
-4. Promote accepted candidates as upstream PRs to OpenHuman / TinyMemory.
-5. Extend to LongMemEval-V2 once an OH `Memory.insert/query` adapter exists.
+1. Measure the `recall::excerpt` candidate in `patches/tinymemory/` through the loop.
+2. First full `tinyrsi run loops/lme2-recall` within its $5 cap; commit the report under
+   `docs/results/`.
+3. Grow the hive roster (analyst, researcher) once the two-seat swarm proves itself.
+4. Upstream promoted TinyMemory changes, each with its regression test.
 
 ## Out of scope
 
 - Editing benchmarks, datasets, judges or scorers to raise a score.
-- Unbounded paid runs: every campaign carries a hard spend cap.
+- Unbounded paid runs: every run carries a hard spend cap.

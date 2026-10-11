@@ -12,126 +12,55 @@ permissions:
   contents: read
 
 env:
-  # Lint levels live in `[workspace.lints]` in the root Cargo.toml so local and
-  # CI runs agree; don't add a blanket RUSTFLAGS here.
   CARGO_TERM_COLOR: always
 
 jobs:
-  rust:
-    name: Rust
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          # This job executes repository code (cargo build/test); don't persist
-          # the token in git config.
-          persist-credentials: false
-          # The ohrsi crate builds without the (large) vendored submodules.
-          submodules: false
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Build
-        run: cargo build --all-targets --all-features
-
-      - name: Test
-        run: cargo test --all-features
-
-      - name: Test default features
-        run: cargo test
-
-      - name: Validate committed campaigns
-        run: cargo run -p ohrsi -- check
-
-      - name: Require 90% line coverage in every source file
-        run: .github/scripts/check-file-coverage.sh 90 coverage.json
-
-      - name: Upload coverage report
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-json
-          path: coverage.json
-          if-no-files-found: ignore
-
-  docs:
-    name: Docs
+  python:
+    name: Loop scripts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          # The ohrsi crate builds without the (large) vendored submodules.
+          # The unit tests cover only the pure parts of the scorer and gates.
           submodules: false
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Unit tests
+        run: python3 -m unittest discover -s loops/lme2-recall/tests -v
 
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build documentation
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --all-features
-
-  msrv:
-    name: Minimum supported Rust version
+  loop:
+    name: Loop folder
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
+          # This job builds and runs submodule code; don't persist the token.
           persist-credentials: false
-          # The ohrsi crate builds without the (large) vendored submodules.
           submodules: false
 
-      # `rust-version` is inherited from `[workspace.package]`, so every member
-      # reports the same value. Read it off the package the module ships as
-      # rather than off `packages[0]`, whose order cargo does not promise.
-      - name: Read rust-version from Cargo.toml
-        id: msrv
+      # tinyrsi (for the binary) and OpenHuman (for TinyMemory, which the
+      # memd adapter builds against), each with its own nested submodules.
+      # `benchmarks/` is not needed: nothing here runs the evaluation.
+      - name: Check out submodules
         run: |
           set -euo pipefail
-          msrv="$(cargo metadata --format-version 1 --no-deps \
-            | jq -r '.packages[] | select(.name == "ohrsi") | .rust_version')"
-          if [[ -z "$msrv" || "$msrv" == "null" ]]; then
-            echo "workspace.package.rust-version is not set in Cargo.toml" >&2
-            exit 1
-          fi
-          echo "version=$msrv" >> "$GITHUB_OUTPUT"
+          git submodule update --init vendor/tinyrsi vendor/openhuman
+          git -C vendor/tinyrsi submodule update --init --recursive --depth 1
+          git -C vendor/openhuman submodule update --init --recursive --depth 1
 
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Build with the declared MSRV
-        run: cargo build --all-targets --all-features
-
-  supply-chain:
-    name: Supply chain
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
         with:
-          persist-credentials: false
-          # The ohrsi crate builds without the (large) vendored submodules.
-          submodules: false
+          workspaces: |
+            vendor/tinyrsi -> target
+            adapters/lme2-memd -> ../../target/memd
 
-      - name: Check advisories, licenses, bans, and sources
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check all
+      # `check` resolves the OpenRouter key's name but never uses its value.
+      - name: Validate the loop folder
+        env:
+          OPENROUTER_API_KEY: ci-placeholder
+        run: cargo run --locked --manifest-path vendor/tinyrsi/Cargo.toml -p tinyrsi-cli -- check loops/lme2-recall
+
+      - name: Build the memd adapter against the vendored TinyMemory
+        run: cargo build --locked --manifest-path adapters/lme2-memd/Cargo.toml --target-dir target/memd

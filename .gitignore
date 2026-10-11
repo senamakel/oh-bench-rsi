@@ -3,6 +3,10 @@
 **/*.rs.bk
 *.pdb
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # Coverage output
 /coverage/
 /coverage.json
@@ -28,6 +32,3 @@ worktrees/*
 runs/*
 !runs/.gitkeep
 
-# Python bytecode from the bench and RSI scripts
-__pycache__/
-*.pyc
