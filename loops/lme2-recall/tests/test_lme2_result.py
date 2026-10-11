@@ -56,7 +56,7 @@ class BuildResultTest(unittest.TestCase):
 
     def test_result_is_json_with_a_finite_score(self) -> None:
         decoded = json.loads(json.dumps(self.result))
-        self.assertEqual(set(decoded), {"score", "splits", "failures", "metrics"})
+        self.assertEqual(set(decoded), {"score", "splits", "failures", "metrics", "private"})
 
     def test_failures_are_capped_per_type_and_in_total(self) -> None:
         many = [dict(self.failures[0], question_id=f"x{i}") for i in range(10)]
