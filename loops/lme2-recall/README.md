@@ -52,8 +52,9 @@ moves it). `tinyrsi runs` and `tinyrsi show lme2-recall/<run-id>` read it back.
 against `$RSI_CANDIDATE/crates`, runs CortexDB and the unmodified official
 harness in Docker with every model call tagged through the gateway
 (`/__tag/ingest/cortex`, `/__tag/reader/harness`, `/__tag/judge/harness`),
-reuses `runs/ingest-cache/<key>` when the TinyMemory write path is unchanged,
-and writes into `$RSI_OUT`:
+reuses `runs/ingest-cache/<key>` when the TinyMemory write path is unchanged
+(a restored ingest that still had enrichment queued is re-cached once it has
+settled, so the queue is paid for once), and writes into `$RSI_OUT`:
 
 - `result.json` — `score` (dev accuracy), `splits.dev.items` and
   `splits.test.items` (per-question 0/1), `failures` (dev only) and `metrics`

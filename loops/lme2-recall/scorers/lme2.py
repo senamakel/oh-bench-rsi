@@ -20,7 +20,8 @@ for a smoke run). Steps, each logged to ``<out>/eval.log``:
    is restored from the ingest cache when the haystack *and* the write path
    (TinyMemory's api/integrations sources, the adapter's converter, the
    CortexDB image and config) are unchanged; otherwise it ingests and the
-   result is cached for later candidates.
+   result is cached for later candidates. A restored ingest that still had
+   enrichment queued replaces the cache once it has settled.
 3. Run the unmodified official harness in its Linux container with the
    ``oh_tinymemory`` backend, GLM 5.3 Flash as reader and judge, both
    through the gateway (``/__tag/reader/harness``, ``/__tag/judge/harness``).
