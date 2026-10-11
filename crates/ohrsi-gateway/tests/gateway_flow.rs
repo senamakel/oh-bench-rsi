@@ -31,6 +31,10 @@ async fn mock_chat(
         "reject" => (axum::http::StatusCode::BAD_REQUEST, Json(json!({"error": "bad"}))).into_response(),
         "crash" => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "oops").into_response(),
         "overcost" => Json(json!({"choices": [], "usage": {"cost": 10.0}})).into_response(),
+        "slow" => {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            Json(json!({"choices": [], "usage": {"cost": 0.003}})).into_response()
+        }
         "tokens" => Json(json!({"choices": [], "usage": {"prompt_tokens": 1000, "completion_tokens": 1000}})).into_response(),
         _ if body["stream"] == json!(true) => {
             let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"cost\":0.001,\"prompt_tokens\":5,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n";
@@ -363,4 +367,25 @@ async fn unreachable_upstreams_return_502_and_keep_the_reservation() {
     assert!(ledgers["run"]["uncertain_usd"].as_f64().unwrap() > 0.0);
     let _ = tx.send(());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn a_client_that_disconnects_mid_call_still_settles() {
+    let h = Harness::start("disconnect", 5.0, 50.0).await;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(50))
+        .build()
+        .unwrap();
+    let body = json!({"model": "z-ai/glm-5.3-flash", "messages": [{"role": "user", "content": "slow"}]});
+    let result = client.post(format!("{}/v1/chat/completions", h.base)).json(&body).send().await;
+    assert!(result.is_err(), "the client gives up before the upstream answers");
+    for _ in 0..100 {
+        let run = h.status().await["run"].clone();
+        if run["in_flight_usd"].as_f64().unwrap() < 1e-12 {
+            assert!((run["settled_usd"].as_f64().unwrap() - 0.003).abs() < 1e-12, "{run}");
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("reservation never settled: {}", h.status().await);
 }
