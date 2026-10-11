@@ -67,11 +67,25 @@ settled, so the queue is paid for once), and writes into `$RSI_OUT`:
 
 It also prints `METRIC lme2_dev_accuracy=…` and `METRIC lme2_test_accuracy=…`.
 
+## Memory model calls go to the ladder
+
+CortexDB's chat calls (fact extraction, answers, verification) go to the
+local LLM ladder router (`http://127.0.0.1:6969`, model `flash`, the same GLM
+5.3 Flash on surplus capacity, at no cost) instead of the spend gateway: `rsi.json`'s
+`env` sets `LME2_MEMORY_LLM_URL`, `LME2_MEMORY_LLM_MODEL` and
+`LME2_MEMORY_LLM_KEY_ENV`, and its `keys` entry `"ladder": "LADDER_API_KEY"`
+hands the router's key to the scorer only (tinyrsi passes plain keys to steps;
+tinyhumansai/tinyrsi#61). The scorer gives the key to `docker run` by name, so
+it never appears on a logged command line. Embeddings, the reader, the judge
+and the hive still go through the gateway: the cached index was built with
+`text-embedding-3-small`, and queries must be embedded the same way. Remove
+the `env` entries to send everything through the gateway again.
+
 ## Tuning with `env`
 
 Step commands see only `PATH`, `HOME`, `TMPDIR`, the `RSI_*` variables and
-`rsi.json`'s `env` map. The committed `rsi.json` sets no `env`: a full run
-uses the frozen defaults. For a local smoke run, add an `env` map with any of:
+`rsi.json`'s `env` map. The committed `rsi.json`'s `env` only routes CortexDB's chat calls (see
+above); the measurement uses the frozen defaults. For a local smoke run, add an `env` map with any of:
 
 | Key | Default | Effect |
 | --- | --- | --- |
