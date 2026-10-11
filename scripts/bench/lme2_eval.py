@@ -144,8 +144,11 @@ def start_cortex(name: str, data_dir: pathlib.Path, gateway: str, log: Log) -> s
         **CORTEX_INGEST_ENV,
     }
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
-    cmd = ["docker", "run", "-d", "--name", name, "-p", "127.0.0.1::3141", "-v", f"{data_dir}:/data/cortex",
-           "-v", f"{CORTEX_TOML}:/data/cortex.toml:ro"]
+    # CortexDB keeps all of its state (WAL, HNSW, facts, snapshots) under its
+    # data root, `/data`. Persist the whole root, so a stopped container's
+    # directory is a complete, restorable ingest; the config sits inside it.
+    shutil.copy(CORTEX_TOML, data_dir / "cortex.toml")
+    cmd = ["docker", "run", "-d", "--name", name, "-p", "127.0.0.1::3141", "-v", f"{data_dir}:/data"]
     for k, v in env.items():
         cmd += ["-e", f"{k}={v}"]
     run(cmd + [CORTEX_IMAGE, "3141", "/data"], log, capture_output=True)
