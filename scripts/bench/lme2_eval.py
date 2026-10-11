@@ -54,6 +54,8 @@ MOUNT_ROOT = pathlib.Path(os.environ.get("OHRSI_MOUNT_ROOT", str(ROOT.parents[1]
 CORTEX_INGEST_ENV = {
     "CORTEX_ENRICHMENT_SCAN_CHUNK": "4096",
     "CORTEX_ENRICHMENT_CONCURRENCY": "16",
+    # Enrich events already on disk when a data directory is reopened.
+    "CORTEX_ENRICHMENT_BACKFILL": "1",
 }
 WRITE_PATH = [
     "vendor/tinymemory/crates/tinymemory-api",
