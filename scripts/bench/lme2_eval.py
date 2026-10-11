@@ -257,6 +257,8 @@ def main() -> None:
     cortex_name = f"ohrsi-{args.label}-cortex".replace("/", "-")
     procs = []
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "TMPDIR")}
+    env["MEMD_SETTLE_SECS"] = os.environ.get("MEMD_SETTLE_SECS", "10800")
+    succeeded = False
     try:
         if args.engine == "cortex":
             data_dir = out / "cortex-data"
@@ -309,13 +311,20 @@ def main() -> None:
                 shutil.rmtree(cache)
             tmp.rename(cache)
             log(f"cached ingest as {key}")
+        succeeded = True
     finally:
         for p in procs:
             p.terminate()
         if args.engine == "cortex":
             subprocess.run(["docker", "logs", cortex_name], stdout=(out / "cortex.log").open("w"), stderr=subprocess.STDOUT)
             subprocess.run(["docker", "rm", "-f", cortex_name], capture_output=True)
-        shutil.rmtree(out / "cortex-data", ignore_errors=True)
+        # A failed run keeps its data directory: a paid ingest is recoverable
+        # with lme2_snapshot.py. Only a finished run (cached or a cache hit)
+        # discards its working copy.
+        if succeeded:
+            shutil.rmtree(out / "cortex-data", ignore_errors=True)
+        else:
+            log(f"evaluation failed; keeping {out / 'cortex-data'} for lme2_snapshot.py")
 
     per_question = next(harness_out.rglob("per_question.jsonl"))
     summary = summarize(per_question, splits, out)

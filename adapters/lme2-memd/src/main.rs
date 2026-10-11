@@ -149,7 +149,10 @@ fn enrichment_ready(polls: &[Backlog], stored: u64) -> bool {
 
 async fn settle(State(d): Shared) -> Response {
     let started = Instant::now();
-    let deadline = started + Duration::from_secs(1800);
+    // CortexDB enriches in waves; a 1,700-event haystack takes tens of
+    // minutes. `MEMD_SETTLE_SECS` bounds the wait (default three hours).
+    let settle_secs = std::env::var("MEMD_SETTLE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(10_800);
+    let deadline = started + Duration::from_secs(settle_secs);
     let expected = d.receipts.lock().await.clone();
     loop {
         match readable(&d).await {
