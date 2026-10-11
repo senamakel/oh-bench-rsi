@@ -113,6 +113,40 @@ async fn readable(d: &Daemon) -> Result<HashSet<ItemId>, String> {
     }
 }
 
+/// One poll of CortexDB's `/v1/admin/usage`, reduced to what readiness needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Backlog {
+    pending: u64,
+    queued: u64,
+    /// Events enriched or permanently failed (`enrichment_coverage`).
+    processed: u64,
+}
+
+impl Backlog {
+    fn from_usage(usage: &Value) -> Option<Self> {
+        Some(Self {
+            pending: usage["enrichment_backlog"]["jobs_pending"].as_u64()?,
+            queued: usage["enrichment_backlog"]["jobs_queued_total"].as_u64()?,
+            processed: usage["enrichment_coverage"]["events_enriched"].as_u64()?
+                + usage["enrichment_coverage"]["events_failed"].as_u64().unwrap_or(0),
+        })
+    }
+}
+
+/// Whether enrichment has caught up with `stored` writes.
+///
+/// CortexDB queues enrichment in waves (256 jobs at a time), so an empty
+/// queue alone does not mean every write was enriched: the next wave may not
+/// be queued yet. Ready means every stored item has been processed *and*
+/// the queue has been empty and unchanged for three consecutive polls.
+fn enrichment_ready(polls: &[Backlog], stored: u64) -> bool {
+    let tail = match polls.len().checked_sub(3) {
+        Some(start) => &polls[start..],
+        None => return false,
+    };
+    tail.iter().all(|b| b.pending == 0 && b.processed >= stored && b.queued == tail[0].queued)
+}
+
 async fn settle(State(d): Shared) -> Response {
     let started = Instant::now();
     let deadline = started + Duration::from_secs(1800);
@@ -131,24 +165,27 @@ async fn settle(State(d): Shared) -> Response {
     let mut enrichment = Value::Null;
     if let Some((url, key)) = &d.cortex {
         let client = reqwest::Client::new();
-        let (mut quiet, mut last) = (0, None);
-        while quiet < 3 {
+        let stored = u64::try_from(expected.len()).unwrap_or(u64::MAX);
+        let mut polls = Vec::new();
+        while !enrichment_ready(&polls, stored) {
             if Instant::now() >= deadline {
-                return fail(StatusCode::GATEWAY_TIMEOUT, format!("enrichment did not drain: {enrichment}"));
+                return fail(StatusCode::GATEWAY_TIMEOUT, format!("enrichment did not catch up: {enrichment}"));
+            }
+            if !polls.is_empty() {
+                tokio::time::sleep(Duration::from_secs(5)).await;
             }
             let usage = client.get(format!("{url}/v1/admin/usage")).bearer_auth(key).send().await;
             let usage: Value = match usage {
                 Ok(r) => r.json().await.unwrap_or(Value::Null),
                 Err(error) => return fail(StatusCode::BAD_GATEWAY, error),
             };
-            enrichment = usage["enrichment_backlog"].clone();
-            let pending = enrichment["jobs_pending"].as_u64().unwrap_or(u64::MAX);
-            let queued = enrichment["jobs_queued_total"].as_u64();
-            quiet = if pending == 0 && queued.is_some() && last == queued { quiet + 1 } else { 0 };
-            last = queued;
-            eprintln!("lme2-memd: enrichment pending={pending} queued={queued:?} quiet={quiet}");
-            if quiet < 3 {
-                tokio::time::sleep(Duration::from_secs(5)).await;
+            enrichment = json!({"backlog": usage["enrichment_backlog"], "coverage": usage["enrichment_coverage"]});
+            match Backlog::from_usage(&usage) {
+                Some(backlog) => {
+                    eprintln!("lme2-memd: enrichment {backlog:?} stored={stored}");
+                    polls.push(backlog);
+                }
+                None => return fail(StatusCode::BAD_GATEWAY, format!("unexpected usage payload: {usage}")),
             }
         }
     }
@@ -291,6 +328,35 @@ mod daemon_test {
         let (status, body) = call(&app, "GET", "/health", json!({})).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["stored"], 1);
+    }
+
+    fn poll(pending: u64, queued: u64, processed: u64) -> Backlog {
+        Backlog { pending, queued, processed }
+    }
+
+    #[test]
+    fn an_empty_queue_between_waves_is_not_ready() {
+        // The first wave of 512 drained, but 1,737 items were stored.
+        let polls = [poll(0, 512, 512), poll(0, 512, 512), poll(0, 512, 512)];
+        assert!(!enrichment_ready(&polls, 1737));
+    }
+
+    #[test]
+    fn ready_once_every_item_is_processed_and_the_queue_is_still() {
+        let mut polls = vec![poll(3, 1792, 1734), poll(0, 1792, 1737), poll(0, 1792, 1737)];
+        assert!(!enrichment_ready(&polls, 1737), "only two quiet polls");
+        polls.push(poll(0, 1792, 1737));
+        assert!(enrichment_ready(&polls, 1737));
+        polls.push(poll(0, 2048, 1737));
+        assert!(!enrichment_ready(&polls, 1737), "a new wave restarts the count");
+    }
+
+    #[test]
+    fn reads_backlog_and_coverage_from_usage() {
+        let usage = json!({"enrichment_backlog": {"jobs_pending": 2, "jobs_queued_total": 512},
+            "enrichment_coverage": {"events_enriched": 450, "events_failed": 3}});
+        assert_eq!(Backlog::from_usage(&usage), Some(poll(2, 512, 453)));
+        assert_eq!(Backlog::from_usage(&json!({})), None);
     }
 
     #[tokio::test]
