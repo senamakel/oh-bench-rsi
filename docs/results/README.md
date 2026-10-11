@@ -1,0 +1,11 @@
+# Run reports
+
+One file per run of the $50 campaign (10 runs, $5 cap each). Ledger values
+come from `runs/<run>/budget.json` and `runs/ledger-total.json`; "charged"
+includes reservations kept because a call's cost was unknown.
+
+| Run | Purpose | Charged | Outcome |
+| --- | --- | ---: | --- |
+| [run-00](run-00.md) | gateway/adapter probes | $0.96* | wiring verified; *orphaned reservations, see report |
+| [run-01](run-01.md) | Claude test run: setup, swarm smoke, first ingests | $1.11 | swarm wiring proven; two ingests lost to config bugs |
+| run-02 | baseline ingest + eval | — | in progress |
