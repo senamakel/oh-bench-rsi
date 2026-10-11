@@ -10,7 +10,9 @@ the lines the candidate adds relative to the incumbent:
 and fails when, case-insensitively, any added line contains
 
 - a benchmark canary (the dataset name, its site names and local hosts);
-- a gold answer fragment of six or more characters from the frozen subset;
+- a gold answer fragment of six or more characters from the frozen subset,
+  unless the incumbent's own source already contains it (a common word such
+  as "weight" in the existing code is vocabulary, not new benchmark content);
 - any 40-character window of a subset question (windows start every 20
   characters).
 
@@ -59,11 +61,15 @@ def benchmark_strings(subset: dict, question_lines: list[str]) -> tuple[list[str
     return questions, answers
 
 
-def leaks(added: str, questions: list[str], answers: list[str]) -> dict[str, int]:
-    """How many canaries, gold answers and question windows ``added`` contains."""
+def leaks(added: str, questions: list[str], answers: list[str], known: str = "") -> dict[str, int]:
+    """How many canaries, gold answers and question windows ``added`` contains.
+
+    ``known`` is the lower-cased text the incumbent already holds: a gold
+    answer fragment found there is not counted. Canaries and question text
+    always are."""
     hits = {
         "canary": sum(c in added for c in CANARIES),
-        "gold answer": sum(a in added for a in set(answers)),
+        "gold answer": sum(a in added and a not in known for a in set(answers)),
         "question text": 0,
     }
     for q in questions:
@@ -79,6 +85,16 @@ def git(repo: str, *args: str) -> str:
     return subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True, text=True).stdout
 
 
+def known_text(repo: str) -> str:
+    """The lower-cased text of every file the incumbent tracks under ``crates/``."""
+    parts = []
+    for name in git(repo, "ls-files", "-z", "crates").split("\0"):
+        path = pathlib.Path(repo) / name
+        if name and path.is_file():
+            parts.append(path.read_text(encoding="utf-8", errors="replace").lower())
+    return "\n".join(parts)
+
+
 def main() -> int:
     candidate, incumbent = os.environ["RSI_CANDIDATE"], os.environ["RSI_INCUMBENT"]
     if not QUESTIONS.exists():
@@ -88,7 +104,7 @@ def main() -> int:
     added = added_text(git(candidate, "diff", f"{base}...HEAD"))
     subset = json.loads(SUBSET.read_text(encoding="utf-8"))
     questions, answers = benchmark_strings(subset, QUESTIONS.read_text(encoding="utf-8").splitlines())
-    found = leaks(added, questions, answers)
+    found = leaks(added, questions, answers, known=known_text(incumbent))
     if found:
         summary = ", ".join(f"{n} {kind}" for kind, n in sorted(found.items()))
         print(f"leakage: benchmark content in the diff ({summary})", file=sys.stderr)
