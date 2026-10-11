@@ -48,6 +48,13 @@ MODEL = "z-ai/glm-5.3-flash"
 EMBED = "openai/text-embedding-3-small"
 # The whole oh-bench-rsi checkout is mounted at its own path in containers.
 MOUNT_ROOT = pathlib.Path(os.environ.get("OHRSI_MOUNT_ROOT", str(ROOT.parents[1] if ROOT.parent.name == "worktrees" else ROOT)))
+# Enrichment throughput settings. CortexDB otherwise enqueues enrichment in
+# 256-event scan chunks with low concurrency, which leaves most of a
+# 1,700-event haystack unenriched for hours. One wave, sixteen workers.
+CORTEX_INGEST_ENV = {
+    "CORTEX_ENRICHMENT_SCAN_CHUNK": "4096",
+    "CORTEX_ENRICHMENT_CONCURRENCY": "16",
+}
 WRITE_PATH = [
     "vendor/tinymemory/crates/tinymemory-api",
     "vendor/tinymemory/crates/tinymemory-integrations",
@@ -111,6 +118,15 @@ def docker_gateway(gateway: str) -> str:
     return gateway.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal")
 
 
+def ingest_key(checkout: pathlib.Path, haystack_ids: list[str], engine: str) -> tuple[str, str]:
+    """The ingest cache key: haystack, engine, image, ingest env and write path."""
+    material = json.dumps({
+        "haystack": haystack_ids, "engine": engine, "image": CORTEX_IMAGE, "ingest_env": CORTEX_INGEST_ENV,
+        "write_path": tree_digest([checkout / p for p in WRITE_PATH] + [MEMD_SRC / "src/convert.rs", CORTEX_TOML]),
+    }, sort_keys=True)
+    return hashlib.sha256(material.encode()).hexdigest()[:24], material
+
+
 def start_cortex(name: str, data_dir: pathlib.Path, gateway: str, log: Log) -> str:
     inference = f"{docker_gateway(gateway)}/__tag/ingest/cortex/v1"
     env = {
@@ -123,6 +139,7 @@ def start_cortex(name: str, data_dir: pathlib.Path, gateway: str, log: Log) -> s
         "CORTEX_ANSWER_MODEL": MODEL, "CORTEX_VERIFIER_URL": inference, "CORTEX_VERIFIER_API_KEY": "dummy",
         "CORTEX_VERIFIER_MODEL": MODEL, "CORTEX_VERIFIER_MAX_TOKENS": "4096", "CORTEX_ENTITY_GRAPH": "1",
         "CORTEX_V1_LAYERS_AUTO": "1", "CORTEX_AUTO_ROUTE": "1", "CORTEX_CONSOLIDATION_MIN_AGE_HOURS": "0",
+        **CORTEX_INGEST_ENV,
     }
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
     cmd = ["docker", "run", "-d", "--name", name, "-p", "127.0.0.1::3141", "-v", f"{data_dir}:/data/cortex",
@@ -219,11 +236,7 @@ def main() -> None:
     memd = build_memd(checkout, out, log)
 
     haystack_ids = json.loads(hpath.read_text())[next(iter(splits))]
-    key_material = json.dumps({
-        "haystack": haystack_ids, "engine": args.engine, "image": CORTEX_IMAGE,
-        "write_path": tree_digest([checkout / p for p in WRITE_PATH] + [MEMD_SRC / "src/convert.rs", CORTEX_TOML]),
-    }, sort_keys=True)
-    key = hashlib.sha256(key_material.encode()).hexdigest()[:24]
+    key, key_material = ingest_key(checkout, haystack_ids, args.engine)
     cache = ROOT / "runs/ingest-cache" / key
     hit = args.engine == "cortex" and (cache / "COMPLETE").exists()
     log(f"ingest cache {key}: {'hit' if hit else 'miss'}")
