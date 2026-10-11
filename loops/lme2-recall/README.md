@@ -57,7 +57,7 @@ and writes into `$RSI_OUT`:
 
 - `result.json` — `score` (dev accuracy), `splits.dev.items` and
   `splits.test.items` (per-question 0/1), `failures` (dev only) and `metrics`
-  (`dev_accuracy`, `test_accuracy`, `dev_pack_tokens_mean`,
+  (`dev_accuracy`, `dev_pack_tokens_mean`,
   `dev_accuracy_<type>`);
 - `summary.json`, `dev_failures.jsonl`, `eval.log`, `harness.log`,
   `memd.log`, `cortex.log`;

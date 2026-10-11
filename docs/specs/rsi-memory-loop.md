@@ -71,7 +71,8 @@ the scorer plumbing and the loop folder, and records each run in
 | `score` | dev accuracy |
 | `splits.dev.items`, `splits.test.items` | per-question 0/1 scores |
 | `failures` | up to 30 dev failures, ≤ 4 per question type: `{id, type, text}` |
-| `metrics` | `dev_accuracy`, `test_accuracy`, `dev_pack_tokens_mean`, `dev_accuracy_<type>` |
+| `metrics` | `dev_accuracy`, `dev_pack_tokens_mean`, `dev_accuracy_<type>` (shown to the hive) |
+| `private` | `test_accuracy` (stored and shown in the UI, never in the brief) |
 
 A failure's `text` holds the question (≤ 600 chars), the model's answer with
 an `[answered unknown]` marker, and the recall pack (≤ 1,500 chars) in a code
