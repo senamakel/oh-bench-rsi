@@ -121,10 +121,10 @@ pub fn prepare(
         let effort = map
             .remove("reasoning_effort")
             .and_then(|v| v.as_str().map(str::to_owned));
-        if !map.contains_key("reasoning") {
-            if let Some(effort) = effort.as_deref().or(limits.default_reasoning) {
-                map.insert("reasoning".into(), json!({ "effort": effort }));
-            }
+        if let Some(effort) = effort.as_deref().or(limits.default_reasoning)
+            && !map.contains_key("reasoning")
+        {
+            map.insert("reasoning".into(), json!({ "effort": effort }));
         }
         stream = map.get("stream").and_then(Value::as_bool).unwrap_or(false);
         if stream {

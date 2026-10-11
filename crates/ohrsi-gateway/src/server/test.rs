@@ -29,6 +29,7 @@ fn parses_defaults_and_overrides() {
         "127.0.0.1:0",
         "--upstream",
         "http://127.0.0.1:9/v1",
+        "--capture",
     ]))
     .unwrap();
     assert!((options.run_limit - 2.5).abs() < 1e-12);
