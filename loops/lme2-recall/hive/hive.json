@@ -34,7 +34,7 @@
       "template": "openhuman",
       "config": {
         "action_dir": "{incumbent}",
-        "max_iterations": 40,
+        "max_iterations": 150,
         "temperature": 0.0
       },
       "model": "flash",
@@ -67,7 +67,7 @@
       "template": "openhuman",
       "config": {
         "action_dir": "{candidate}",
-        "max_iterations": 120,
+        "max_iterations": 300,
         "temperature": 0.0
       },
       "model": "flash",
