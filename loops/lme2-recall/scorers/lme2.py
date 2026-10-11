@@ -66,8 +66,9 @@ MOUNT_ROOT = pathlib.Path(os.environ.get("LME2_MOUNT_ROOT", str(ROOT.parents[1] 
 CORTEX_INGEST_ENV = {
     "CORTEX_ENRICHMENT_SCAN_CHUNK": "4096",
     "CORTEX_ENRICHMENT_CONCURRENCY": "16",
-    # Enrich events already on disk when a data directory is reopened.
-    "CORTEX_ENRICHMENT_BACKFILL": "1",
+    # No CORTEX_ENRICHMENT_BACKFILL: a restored snapshot must not re-enrich
+    # (measured: a backfill restart re-dispatched 1,168 jobs). Backfill is
+    # only for salvaging a live container with lme2_snapshot.py.
     # Cost bounds. Measured on this haystack, full enrichment costs ~$0.004
     # per event (~$7 for 1,737), more than one $5 run. TinyMemory recall
     # does not read the entity graph (45% of the calls), and fact extraction
@@ -338,6 +339,8 @@ def main(argv: list[str] | None = None) -> None:
     cortex_name = "lme2-" + re.sub(r"[^A-Za-z0-9_.-]", "-", args.label) + "-cortex"
     procs = []
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "TMPDIR")}
+    env["MEMD_SETTLE_SECS"] = os.environ.get("MEMD_SETTLE_SECS", "10800")
+    succeeded = False
     try:
         if args.engine == "cortex":
             data_dir = out / "cortex-data"
@@ -394,13 +397,20 @@ def main(argv: list[str] | None = None) -> None:
                 shutil.rmtree(cache)
             tmp.rename(cache)
             log(f"cached ingest as {key}")
+        succeeded = True
     finally:
         for p in procs:
             p.terminate()
         if args.engine == "cortex":
             subprocess.run(["docker", "logs", cortex_name], stdout=(out / "cortex.log").open("w"), stderr=subprocess.STDOUT)
             subprocess.run(["docker", "rm", "-f", cortex_name], capture_output=True)
-        shutil.rmtree(out / "cortex-data", ignore_errors=True)
+        # A failed run keeps its data directory: a paid ingest is recoverable
+        # with lme2_snapshot.py. Only a finished run (cached or a cache hit)
+        # discards its working copy.
+        if succeeded:
+            shutil.rmtree(out / "cortex-data", ignore_errors=True)
+        else:
+            log(f"evaluation failed; keeping {out / 'cortex-data'} for lme2_snapshot.py")
 
     per_question = next(harness_out.rglob("per_question.jsonl"))
     records = [json.loads(l) for l in per_question.read_text(encoding="utf-8").splitlines() if l.strip()]

@@ -31,3 +31,4 @@ worktrees/*
 # RSI run output: candidate checkouts, ledgers, traces, benchmark captures
 runs/*
 !runs/.gitkeep
+

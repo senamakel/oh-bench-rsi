@@ -1,0 +1,372 @@
+From 7f1a638394ea6395cde707e1c506bf7e186ba73b Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 18:12:23 +0530
+Subject: [PATCH 1/5] feat(rsi-viz): add swarm simulation module with tests
+
+Introduce a swarm behaviour module for the rsi-viz app along with a test
+suite covering its core logic. This provides the simulation primitives
+needed for upcoming visualisation work.
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ apps/rsi-viz/lib/swarm.test.ts |  83 +++++++++++
+ apps/rsi-viz/lib/swarm.ts      | 256 +++++++++++++++++++++++++++++++++
+ 2 files changed, 339 insertions(+)
+ create mode 100644 apps/rsi-viz/lib/swarm.test.ts
+ create mode 100644 apps/rsi-viz/lib/swarm.ts
+
+diff --git a/apps/rsi-viz/lib/swarm.test.ts b/apps/rsi-viz/lib/swarm.test.ts
+new file mode 100644
+index 0000000..5613925
+--- /dev/null
++++ b/apps/rsi-viz/lib/swarm.test.ts
+@@ -0,0 +1,83 @@
++import { describe, expect, it } from "vitest";
++import { applySwarmBatch, initialSwarmState, isSwarmLine, TOOL_HISTORY } from "./swarm";
++
++const line = (seq: number, event: Record<string, unknown>) => JSON.stringify({ seq, elapsed_ms: seq * 10, event });
++
++const started = line(0, {
++  kind: "swarm_started",
++  hive: "memory-rsi",
++  desk: "memory-lab",
++  run: "run-02-e1",
++  seats: [
++    { id: "lead", role: "lead", model: "z-ai/glm-5.3-flash", action_dir: "/tm", editing: false },
++    { id: "implementer-a", role: "implementer", model: "z-ai/glm-5.3-flash", action_dir: "/wt", editing: true },
++  ],
++});
++
++describe("swarm fold", () => {
++  it("registers seats in declaration order", () => {
++    const s = applySwarmBatch(initialSwarmState(), started);
++    expect(s.order).toEqual(["lead", "implementer-a"]);
++    expect(s.seats["implementer-a"].editing).toBe(true);
++    expect(s.hive).toBe("memory-rsi");
++  });
++
++  it("counts messages per edge, using private recipients when present", () => {
++    const s = applySwarmBatch(
++      initialSwarmState(),
++      [
++        started,
++        line(1, { kind: "agent_message", sequence: 1, from: "host", to: "hive:memory-lab", body: "brief", only_for: ["lead"] }),
++        line(2, { kind: "agent_message", sequence: 2, from: "lead", to: "implementer-a", body: "do x", only_for: [] }),
++        line(3, { kind: "agent_message", sequence: 3, from: "lead", to: "implementer-a", body: "and y", only_for: [] }),
++      ].join("\n"),
++    );
++    expect(s.edges).toEqual({ "host→lead": 1, "lead→implementer-a": 2 });
++    expect(s.seats.lead.messagesSent).toBe(2);
++    expect(s.messages.map((m) => m.body)).toEqual(["brief", "do x", "and y"]);
++  });
++
++  it("tracks the active tool and failures", () => {
++    let s = applySwarmBatch(initialSwarmState(), started);
++    s = applySwarmBatch(s, line(1, { kind: "tool_call", seat: "implementer-a", tool: "shell", phase: "started", detail: "cargo test" }));
++    expect(s.seats["implementer-a"].activeTool).toBe("shell");
++    s = applySwarmBatch(s, line(2, { kind: "tool_call", seat: "implementer-a", tool: "shell", phase: "completed", success: false }));
++    expect(s.seats["implementer-a"].activeTool).toBeNull();
++    expect(s.seats["implementer-a"].toolFailures).toBe(1);
++    expect(s.seats["implementer-a"].toolCalls).toBe(1);
++  });
++
++  it("accumulates turns and keeps the latest spend", () => {
++    const s = applySwarmBatch(
++      initialSwarmState(),
++      [
++        started,
++        line(1, { kind: "agent_turn", seat: "lead", input_tokens: 100, output_tokens: 20, cost_usd: 0.01 }),
++        line(2, { kind: "agent_turn", seat: "lead", input_tokens: 50, output_tokens: 5, cost_usd: 0.002 }),
++        line(3, { kind: "spend", run_usd: 1.5, run_limit_usd: 5, total_usd: 3, total_limit_usd: 50, by_seat: { lead: 0.012 } }),
++        line(4, { kind: "swarm_finished", reason: "idle", completed: 3, failed: 0 }),
++      ].join("\n"),
++    );
++    expect(s.seats.lead.turns).toBe(2);
++    expect(s.seats.lead.inputTokens).toBe(150);
++    expect(s.seats.lead.costUsd).toBeCloseTo(0.012);
++    expect(s.spend?.runLimitUsd).toBe(5);
++    expect(s.spend?.bySeat.lead).toBeCloseTo(0.012);
++    expect(s.finished?.reason).toBe("idle");
++    expect(s.finished?.detail.completed).toBe(3);
++  });
++
++  it("ignores loop-trace kinds and garbage, and bounds tool history", () => {
++    const loop = line(0, { kind: "epoch_started", epoch: 1, incumbent: "abc" });
++    expect(isSwarmLine(loop)).toBe(false);
++    expect(isSwarmLine(started)).toBe(true);
++    expect(isSwarmLine("not json")).toBe(false);
++    let s = applySwarmBatch(initialSwarmState(), `${loop}\nnot json\n`);
++    expect(s).toEqual(initialSwarmState());
++    const calls = Array.from({ length: TOOL_HISTORY + 5 }, (_, i) =>
++      line(i, { kind: "tool_call", seat: "x", tool: "read", phase: "started" }),
++    );
++    s = applySwarmBatch(s, calls.join("\n"));
++    expect(s.tools).toHaveLength(TOOL_HISTORY);
++  });
++});
+diff --git a/apps/rsi-viz/lib/swarm.ts b/apps/rsi-viz/lib/swarm.ts
+new file mode 100644
+index 0000000..675e0c6
+--- /dev/null
++++ b/apps/rsi-viz/lib/swarm.ts
+@@ -0,0 +1,256 @@
++/**
++ * Swarm traces: the per-seat activity of a tinyhivemind hive of agents.
++ *
++ * A swarm host (for example oh-bench-rsi's `ohrsi-swarm`) writes these kinds
++ * into its own `events.jsonl`, in the same envelope as the loop trace:
++ *
++ * | kind | fields |
++ * |---|---|
++ * | `swarm_started` | `hive, desk, run, seats: [{id, role, model, action_dir, editing}]` |
++ * | `agent_message` | `sequence, from, to, body, only_for, episode` |
++ * | `tool_call` | `seat, tool, phase: "started"\|"completed", detail?, success?, output_chars?` |
++ * | `agent_turn` | `seat, input_tokens, output_tokens, cost_usd` |
++ * | `spend` | `run_usd, run_limit_usd, total_usd, total_limit_usd, by_seat` |
++ * | `swarm_finished` | `reason, completed?, failed?, parked?, error?` |
++ *
++ * Loop-trace kinds are left to the loop reducer; this fold ignores them.
++ */
++
++export const SWARM_KINDS = new Set([
++  "swarm_started",
++  "agent_message",
++  "tool_call",
++  "agent_turn",
++  "spend",
++  "swarm_finished",
++]);
++
++export interface SwarmSeat {
++  id: string;
++  role: string;
++  model: string;
++  editing: boolean;
++  actionDir: string;
++  turns: number;
++  inputTokens: number;
++  outputTokens: number;
++  costUsd: number;
++  toolCalls: number;
++  toolFailures: number;
++  /** Tool currently running, if a `started` has no matching `completed` yet. */
++  activeTool: string | null;
++  messagesSent: number;
++}
++
++export interface SwarmMessage {
++  seq: number;
++  sequence: number;
++  from: string;
++  to: string;
++  body: string;
++  onlyFor: string[];
++}
++
++export interface SwarmToolEvent {
++  seq: number;
++  seat: string;
++  tool: string;
++  phase: "started" | "completed";
++  detail: string | null;
++  success: boolean | null;
++}
++
++export interface SwarmSpend {
++  runUsd: number;
++  runLimitUsd: number | null;
++  totalUsd: number;
++  totalLimitUsd: number | null;
++  bySeat: Record<string, number>;
++}
++
++export interface SwarmState {
++  hive: string | null;
++  desk: string | null;
++  run: string | null;
++  order: string[];
++  seats: Record<string, SwarmSeat>;
++  messages: SwarmMessage[];
++  tools: SwarmToolEvent[];
++  /** `from → to` message counts, for the interaction graph. */
++  edges: Record<string, number>;
++  spend: SwarmSpend | null;
++  finished: { reason: string; detail: Record<string, unknown> } | null;
++  elapsedMs: number;
++}
++
++/** Most tool events kept in memory; older ones are dropped. */
++export const TOOL_HISTORY = 200;
++
++export function initialSwarmState(): SwarmState {
++  return {
++    hive: null,
++    desk: null,
++    run: null,
++    order: [],
++    seats: {},
++    messages: [],
++    tools: [],
++    edges: {},
++    spend: null,
++    finished: null,
++    elapsedMs: 0,
++  };
++}
++
++const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback);
++const num = (v: unknown, fallback = 0): number => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
++
++function seat(state: SwarmState, id: string): SwarmSeat {
++  return (
++    state.seats[id] ?? {
++      id,
++      role: "",
++      model: "",
++      editing: false,
++      actionDir: "",
++      turns: 0,
++      inputTokens: 0,
++      outputTokens: 0,
++      costUsd: 0,
++      toolCalls: 0,
++      toolFailures: 0,
++      activeTool: null,
++      messagesSent: 0,
++    }
++  );
++}
++
++function withSeat(state: SwarmState, next: SwarmSeat): SwarmState {
++  const order = state.order.includes(next.id) ? state.order : [...state.order, next.id];
++  return { ...state, order, seats: { ...state.seats, [next.id]: next } };
++}
++
++/** Whether one envelope line belongs to the swarm trace. */
++export function isSwarmLine(line: string): boolean {
++  try {
++    const parsed = JSON.parse(line) as { event?: { kind?: unknown } };
++    return typeof parsed.event?.kind === "string" && SWARM_KINDS.has(parsed.event.kind);
++  } catch {
++    return false;
++  }
++}
++
++/** Folds one envelope line; lines of other kinds return `state` unchanged. */
++export function applySwarmLine(state: SwarmState, line: string): SwarmState {
++  let envelope: { seq?: unknown; elapsed_ms?: unknown; event?: Record<string, unknown> };
++  try {
++    envelope = JSON.parse(line);
++  } catch {
++    return state;
++  }
++  const event = envelope.event;
++  if (!event || typeof event.kind !== "string" || !SWARM_KINDS.has(event.kind)) return state;
++  const seq = num(envelope.seq);
++  let next: SwarmState = { ...state, elapsedMs: Math.max(state.elapsedMs, num(envelope.elapsed_ms)) };
++  switch (event.kind) {
++    case "swarm_started": {
++      next = { ...next, hive: str(event.hive), desk: str(event.desk), run: str(event.run) || null };
++      const seats = Array.isArray(event.seats) ? (event.seats as Record<string, unknown>[]) : [];
++      for (const s of seats) {
++        const id = str(s.id);
++        if (!id) continue;
++        next = withSeat(next, {
++          ...seat(next, id),
++          role: str(s.role),
++          model: str(s.model),
++          editing: s.editing === true,
++          actionDir: str(s.action_dir),
++        });
++      }
++      return next;
++    }
++    case "agent_message": {
++      const from = str(event.from, "host");
++      const to = str(event.to);
++      const message: SwarmMessage = {
++        seq,
++        sequence: num(event.sequence),
++        from,
++        to,
++        body: str(event.body),
++        onlyFor: Array.isArray(event.only_for) ? event.only_for.filter((v): v is string => typeof v === "string") : [],
++      };
++      const targets = message.onlyFor.length > 0 ? message.onlyFor : [to];
++      const edges = { ...next.edges };
++      for (const target of targets) {
++        const key = `${from}→${target}`;
++        edges[key] = (edges[key] ?? 0) + 1;
++      }
++      next = { ...next, messages: [...next.messages, message], edges };
++      if (next.seats[from]) next = withSeat(next, { ...next.seats[from], messagesSent: next.seats[from].messagesSent + 1 });
++      return next;
++    }
++    case "tool_call": {
++      const id = str(event.seat);
++      const phase = event.phase === "completed" ? "completed" : "started";
++      const tool: SwarmToolEvent = {
++        seq,
++        seat: id,
++        tool: str(event.tool),
++        phase,
++        detail: typeof event.detail === "string" ? event.detail : null,
++        success: typeof event.success === "boolean" ? event.success : null,
++      };
++      const current = seat(next, id);
++      const updated =
++        phase === "started"
++          ? { ...current, toolCalls: current.toolCalls + 1, activeTool: tool.tool }
++          : { ...current, activeTool: null, toolFailures: current.toolFailures + (tool.success === false ? 1 : 0) };
++      next = withSeat(next, updated);
++      return { ...next, tools: [...next.tools, tool].slice(-TOOL_HISTORY) };
++    }
++    case "agent_turn": {
++      const id = str(event.seat);
++      const current = seat(next, id);
++      return withSeat(next, {
++        ...current,
++        turns: current.turns + 1,
++        inputTokens: current.inputTokens + num(event.input_tokens),
++        outputTokens: current.outputTokens + num(event.output_tokens),
++        costUsd: current.costUsd + num(event.cost_usd),
++        activeTool: null,
++      });
++    }
++    case "spend": {
++      const bySeat: Record<string, number> = {};
++      if (event.by_seat && typeof event.by_seat === "object") {
++        for (const [k, v] of Object.entries(event.by_seat as Record<string, unknown>)) bySeat[k] = num(v);
++      }
++      return {
++        ...next,
++        spend: {
++          runUsd: num(event.run_usd),
++          runLimitUsd: typeof event.run_limit_usd === "number" ? event.run_limit_usd : null,
++          totalUsd: num(event.total_usd),
++          totalLimitUsd: typeof event.total_limit_usd === "number" ? event.total_limit_usd : null,
++          bySeat,
++        },
++      };
++    }
++    case "swarm_finished": {
++      const { kind: _kind, reason, ...detail } = event;
++      return { ...next, finished: { reason: str(reason, "unknown"), detail } };
++    }
++    default:
++      return next;
++  }
++}
++
++/** Folds a whole SSE batch (lines joined by `\n`). */
++export function applySwarmBatch(state: SwarmState, data: string): SwarmState {
++  let next = state;
++  for (const line of data.split("\n")) {
++    if (line.trim() !== "") next = applySwarmLine(next, line);
++  }
++  return next;
++}
+-- 
+2.50.1 (Apple Git-155)
+
