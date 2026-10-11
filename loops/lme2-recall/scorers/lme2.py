@@ -20,7 +20,8 @@ for a smoke run). Steps, each logged to ``<out>/eval.log``:
    is restored from the ingest cache when the haystack *and* the write path
    (TinyMemory's api/integrations sources, the adapter's converter, the
    CortexDB image and config) are unchanged; otherwise it ingests and the
-   result is cached for later candidates.
+   result is cached for later candidates. A restored ingest that still had
+   enrichment queued replaces the cache once it has settled.
 3. Run the unmodified official harness in its Linux container with the
    ``oh_tinymemory`` backend, GLM 5.3 Flash as reader and judge, both
    through the gateway (``/__tag/reader/harness``, ``/__tag/judge/harness``).
@@ -189,6 +190,30 @@ def start_cortex(name: str, data_dir: pathlib.Path, gateway: str, log: Log) -> s
         except Exception:
             time.sleep(1)
     raise RuntimeError("CortexDB never became ready")
+
+
+BACKLOG = re.compile(r"enrichment Backlog \{ pending: (\d+),")
+
+
+def drained_on_restore(memd_log: str) -> bool:
+    """Whether a restored ingest still had enrichment pending when memd first
+    polled it. Such a snapshot drains its queue (paid model calls) on every
+    restore, so once it has settled it replaces the cached copy."""
+    first = BACKLOG.search(memd_log)
+    return bool(first and int(first.group(1)) > 0)
+
+
+def store_cache(data_dir: pathlib.Path, cache: pathlib.Path, key_material: str, log: Log) -> None:
+    """Atomically replace ``cache`` with a copy-on-write clone of a stopped
+    CortexDB data directory."""
+    tmp = cache.with_name(cache.name + ".tmp")
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    run(["cp", "-cR", data_dir, tmp / "cortex-data"], log)
+    (tmp / "COMPLETE").write_text(key_material, encoding="utf-8")
+    if cache.exists():
+        shutil.rmtree(cache)
+    tmp.rename(cache)
 
 
 def subset_inputs(subset: dict, limit: int | None, out: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path, dict]:
@@ -386,17 +411,12 @@ def main(argv: list[str] | None = None) -> None:
         ]
         with (out / "harness.log").open("w") as hl:
             run(cmd, log, stdout=hl, stderr=subprocess.STDOUT)
-        if args.engine == "cortex" and not hit:
+        memd_log.flush()
+        drained = hit and drained_on_restore((out / "memd.log").read_text(encoding="utf-8", errors="replace"))
+        if args.engine == "cortex" and (not hit or drained):
             run(["docker", "stop", cortex_name], log, capture_output=True)
-            tmp = cache.with_name(key + ".tmp")
-            shutil.rmtree(tmp, ignore_errors=True)
-            tmp.mkdir(parents=True)
-            run(["cp", "-cR", out / "cortex-data", tmp / "cortex-data"], log)
-            (tmp / "COMPLETE").write_text(key_material, encoding="utf-8")
-            if cache.exists():
-                shutil.rmtree(cache)
-            tmp.rename(cache)
-            log(f"cached ingest as {key}")
+            store_cache(out / "cortex-data", cache, key_material, log)
+            log(f"{'re-cached settled' if hit else 'cached'} ingest as {key}")
         succeeded = True
     finally:
         for p in procs:

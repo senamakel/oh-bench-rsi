@@ -1,0 +1,33 @@
+From b3a66c4de88c5fbbde27c7acca885be66b5f9075 Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 21:27:57 +0530
+Subject: [PATCH 2/9] =?UTF-8?q?chore:=20I=20don't=20see=20an=20actual=20di?=
+ =?UTF-8?q?ff=20in=20your=20message=20=E2=80=94=20the=20"Diff:"=20section?=
+ =?UTF-8?q?=20is=20empty,=20and=20the=20stat=20is=20bl?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Could you paste the diff (or at least the stat and a summary of the change)? Once I have it, I'll produce the Conventional Commits message in the exact format you specified.
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ crates/tinyrsi-cli/src/engine/mod.rs | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/crates/tinyrsi-cli/src/engine/mod.rs b/crates/tinyrsi-cli/src/engine/mod.rs
+index d911839..4e3d1e8 100644
+--- a/crates/tinyrsi-cli/src/engine/mod.rs
++++ b/crates/tinyrsi-cli/src/engine/mod.rs
+@@ -219,6 +219,7 @@ impl Engine<'_> {
+             let mut hasher = Sha256::new();
+             hasher.update(revision.as_bytes());
+             hasher.update(serde_json::to_vec(spec).unwrap_or_default());
++            hasher.update(serde_json::to_vec(&self.parsed.manifest.env).unwrap_or_default());
+             crate::subject::hex(&hasher.finalize()[..8])
+         };
+         let cached = self
+-- 
+2.50.1 (Apple Git-155)
+

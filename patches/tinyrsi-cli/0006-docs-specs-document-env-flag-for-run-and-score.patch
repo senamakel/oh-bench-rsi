@@ -1,0 +1,46 @@
+From f84bb266f632f2d8b2a600fd9033abb3660c894e Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 21:31:16 +0530
+Subject: [PATCH 6/9] docs(specs): document --env flag for run and score
+
+Adds the repeatable `--env K=V` option to the `run` and `score` command
+signatures and explains that it overrides `rsi.json`'s `env` for a single
+invocation. The incumbent score cache is now keyed on `env` alongside the
+revision and scorers, so a limited score can no longer stand in for a full one.
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ docs/specs/rsi-cli.md | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/docs/specs/rsi-cli.md b/docs/specs/rsi-cli.md
+index 564e032..6c2e2fe 100644
+--- a/docs/specs/rsi-cli.md
++++ b/docs/specs/rsi-cli.md
+@@ -208,8 +208,8 @@ is shown as `interrupted`.
+ 
+ ```text
+ tinyrsi check <loop>
+-tinyrsi run   <loop> [--run ID] [--epochs N] [--port 8787] [--no-serve]
+-tinyrsi score <loop> --label L [--checkout P]
++tinyrsi run   <loop> [--run ID] [--epochs N] [--port 8787] [--no-serve] [--env K=V]...
++tinyrsi score <loop> --label L [--checkout P] [--env K=V]...
+ tinyrsi runs  [--loop NAME]
+ tinyrsi show  <loop>/<run-id>
+ tinyrsi serve [--port 8787]
+@@ -222,6 +222,11 @@ replay then tail) and `/api/runs/<loop>/<run>/files/<path>` for `run.json`,
+ `ledger.json`, an epoch's `brief.md` and a candidate's `change.diff`. The store
+ layout is also what `apps/rsi-viz` discovers, with `RSI_RUN_ROOT=$TINYRSI_HOME`.
+ 
++`--env K=V` (repeatable) overrides `rsi.json`'s `env` for one invocation; `run`
++records the merged manifest in its frozen loop copy. The incumbent score cache
++is keyed on `env` as well as the revision and scorers, so a limited score never
++stands in for a full one.
++
+ Exit status is 0 on success, 1 on a loop error, 2 on invalid input.
+ 
+ ## Invariants
+-- 
+2.50.1 (Apple Git-155)
+

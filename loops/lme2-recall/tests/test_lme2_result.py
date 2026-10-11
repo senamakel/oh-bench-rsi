@@ -119,3 +119,18 @@ class ArgumentsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SettledOnRestoreTest(unittest.TestCase):
+    """A restored ingest that still had enrichment queued is re-cached once it
+    settles, so the next score does not pay to drain the same queue again."""
+
+    def test_a_restore_with_pending_enrichment_needs_recaching(self) -> None:
+        log = ("lme2-memd: enrichment Backlog { pending: 380, queued: 1168, processed: 1833 } stored=0\n"
+               "lme2-memd: enrichment Backlog { pending: 0, queued: 1168, processed: 2213 } stored=0\n")
+        self.assertTrue(lme2.drained_on_restore(log))
+
+    def test_a_settled_restore_does_not(self) -> None:
+        log = "lme2-memd: enrichment Backlog { pending: 0, queued: 1168, processed: 2213 } stored=0\n"
+        self.assertFalse(lme2.drained_on_restore(log))
+        self.assertFalse(lme2.drained_on_restore(""))

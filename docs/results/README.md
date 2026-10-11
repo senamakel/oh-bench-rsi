@@ -12,5 +12,6 @@ because a call's cost was unknown.
 | [run-00](run-00.md) | gateway/adapter probes | $0.96* | wiring verified; *orphaned reservations, see report |
 | [run-01](run-01.md) | Claude test run: setup, swarm smoke, first ingests | $1.11 | swarm wiring proven; two ingests lost to config bugs |
 | [run-02](run-02.md) | baseline ingest + eval | $2.54 | **dev 0.320 · test 0.160**; 90% of dev failures have no answer in the pack |
+| [run-03](run-03.md) | first `tinyrsi` binary runs, 10 questions | $1.87 | smoke baseline dev 0.20 · test 0.20; both candidates gated (green, leakage) |
 
-Campaign charged so far: **$4.66 of $50** (settled $3.67, uncertain $0.99).
+Campaign charged so far: **$6.53 of $50** (run-00–02 $4.66; run-03 $1.87 in `~/.tinyrsi/spend.json`).
