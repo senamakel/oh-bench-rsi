@@ -54,7 +54,7 @@ spent. Every model call goes through the run's spend gateway, capped at
    `budget.score_reserve_usd` ($0.60) is still affordable.
 6. **Decide** on the 150 test questions only: paired per-question 0/1
    scores, exact one-sided sign test on discordant pairs at α = 0.10.
-7. **Promote** the accepted candidate with the best dev score by
+7. **Promote** the accepted candidate with the best `lme2` score by
    fast-forwarding the local `rsi/main`. Nothing is pushed, merged upstream
    or opened as a PR.
 
