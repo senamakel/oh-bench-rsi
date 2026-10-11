@@ -116,9 +116,9 @@ fn system_prompt(hive_dir: &Path, seat: &tinyhivemind_lang::LoweredSeat, role: &
         text.push_str(&format!("\n## Shared context: {path}\n\n{}\n", body.trim()));
     }
     text.push_str(
-        "\n## Working in the hive\n\nYou are one seat of a hive. Use the native hivemind tools to talk to other seats \
-         (hivemind_send_agent to message one seat, hivemind_read to read the desk) and hivemind_complete to finish an \
-         episode you were assigned. A prose claim of completion is not enough: call the tool.\n\n\
+        "\n## Working in the hive\n\nYou are one seat of a hive. Talk to other seats with hivemind_send_agent; \
+         read your conversation with a seat with hivemind_read. The host's brief arrives as a direct message to the lead. \
+         The lead ends the epoch by sending no further messages and replying with its final report.\n\n\
          Turns are asynchronous. After you send a message, END YOUR TURN with a one-line reply and no further \
          tool calls; you are woken automatically when someone replies. Never wait, sleep or poll for replies.\n",
     );
@@ -240,10 +240,14 @@ async fn run(options: Options) -> anyhow::Result<()> {
         .send_as_host(SendMessage {
             message_id: format!("{run_id}-brief"),
             sender: String::new(),
-            destination: Destination::Hive(desk.id.clone()),
+            // A direct message, not a desk episode: the epoch then runs as a
+            // conversation of seat-to-seat messages and the coordinator goes
+            // idle when the lead stops sending. An episode would re-nudge the
+            // lead every round while it waits for an implementer.
+            destination: Destination::Agent(lead.clone()),
             body: kickoff,
             thread: None,
-            only_for: vec![lead.clone()],
+            only_for: Vec::new(),
             starters: Vec::new(),
         })
         .await?;
