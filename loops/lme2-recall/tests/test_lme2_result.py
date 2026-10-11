@@ -135,3 +135,41 @@ class SettledOnRestoreTest(unittest.TestCase):
         log = "lme2-memd: enrichment Backlog { pending: 0, queued: 1168, processed: 2213 } stored=0\n"
         self.assertFalse(lme2.drained_on_restore(log))
         self.assertFalse(lme2.drained_on_restore(""))
+
+
+class CortexEnvTest(unittest.TestCase):
+    """CortexDB's model calls go through the spend gateway, or, when
+    ``LME2_MEMORY_LLM_URL`` is set, its chat calls go to that router while
+    embeddings stay on the gateway (the cached index is text-embedding-3-small)."""
+
+    GATEWAY = "http://127.0.0.1:9000"
+
+    def test_every_call_goes_through_the_gateway_by_default(self) -> None:
+        env, secrets = lme2.cortex_env(self.GATEWAY, memory=None)
+        tagged = "http://host.docker.internal:9000/__tag/ingest/cortex/v1"
+        for name in ("CORTEX_EMBEDDING_URL", "CORTEX_LLM_URL", "CORTEX_ENRICHMENT_URL",
+                     "CORTEX_ANSWER_URL", "CORTEX_VERIFIER_URL"):
+            self.assertEqual(env[name], tagged, name)
+        self.assertEqual(env["CORTEX_ENRICHMENT_MODEL"], lme2.MODEL)
+        self.assertEqual(secrets, [])
+
+    def test_a_memory_router_takes_the_chat_calls_and_its_key_is_never_inlined(self) -> None:
+        memory = lme2.MemoryLlm(url="http://host.docker.internal:6969/v1", model="flash", key_env="LADDER_API_KEY")
+        env, secrets = lme2.cortex_env(self.GATEWAY, memory=memory)
+        for name in ("CORTEX_LLM_URL", "CORTEX_ENRICHMENT_URL", "CORTEX_ANSWER_URL", "CORTEX_VERIFIER_URL"):
+            self.assertEqual(env[name], "http://host.docker.internal:6969/v1", name)
+        for name in ("CORTEX_LLM_MODEL", "CORTEX_ENRICHMENT_MODEL", "CORTEX_ANSWER_MODEL", "CORTEX_VERIFIER_MODEL"):
+            self.assertEqual(env[name], "flash", name)
+        self.assertEqual(env["CORTEX_EMBEDDING_URL"], "http://host.docker.internal:9000/__tag/ingest/cortex/v1")
+        self.assertEqual(env["CORTEX_EMBEDDING_MODEL"], lme2.EMBED)
+        self.assertIn("CORTEX_ENRICHMENT_API_KEY", secrets)
+        for name in secrets:
+            self.assertNotIn(name, env, f"{name} must be passed by name, not inlined")
+
+    def test_memory_llm_reads_its_settings_from_the_environment(self) -> None:
+        self.assertIsNone(lme2.memory_llm({}))
+        memory = lme2.memory_llm({"LME2_MEMORY_LLM_URL": "http://h:1/v1", "LME2_MEMORY_LLM_MODEL": "flash",
+                                  "LME2_MEMORY_LLM_KEY_ENV": "LADDER_API_KEY"})
+        self.assertEqual(memory, lme2.MemoryLlm("http://h:1/v1", "flash", "LADDER_API_KEY"))
+        with self.assertRaises(ValueError):
+            lme2.memory_llm({"LME2_MEMORY_LLM_URL": "http://h:1/v1"})
