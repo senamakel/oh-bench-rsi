@@ -6,6 +6,7 @@
 //! ohrsi-swarm run --hive hives/memory-rsi --run-dir runs/<run> --brief <file>
 //!                 --gateway http://127.0.0.1:8790 [--tinymemory <repo>]
 //!                 [--wall-secs 3600] [--turn-secs 1200]
+//!                 [--run-id <id>] [--ledger-dir runs/<run>]
 //! ```
 //!
 //! Every model call goes through the spend gateway, tagged
@@ -40,6 +41,8 @@ struct Options {
     tinymemory: PathBuf,
     wall: Duration,
     turn: Duration,
+    run_id: Option<String>,
+    ledger_dir: Option<PathBuf>,
 }
 
 fn parse(args: &[String]) -> anyhow::Result<Options> {
@@ -53,6 +56,8 @@ fn parse(args: &[String]) -> anyhow::Result<Options> {
         tinymemory: get("--tinymemory").unwrap_or_else(|| "vendor/openhuman/vendor/tinymemory".into()).into(),
         wall: secs("--wall-secs", 3600)?,
         turn: secs("--turn-secs", 1200)?,
+        run_id: get("--run-id"),
+        ledger_dir: get("--ledger-dir").map(PathBuf::from),
     })
 }
 
@@ -118,7 +123,11 @@ async fn run(options: Options) -> anyhow::Result<()> {
         std::fs::create_dir_all(&options.run_dir)?;
         std::fs::canonicalize(&options.run_dir)
     })?;
-    let run_id = run_dir.file_name().and_then(|n| n.to_str()).context("run id")?.to_owned();
+    let run_id = match options.run_id.clone() {
+        Some(id) => id,
+        None => run_dir.file_name().and_then(|n| n.to_str()).context("run id")?.to_owned(),
+    };
+    let ledger_dir = options.ledger_dir.clone().unwrap_or_else(|| run_dir.clone());
     let swarm_dir = run_dir.join("swarm");
     std::fs::create_dir_all(&swarm_dir)?;
     let trace = Arc::new(Trace::create(&swarm_dir.join("events.jsonl"))?);
@@ -196,7 +205,7 @@ async fn run(options: Options) -> anyhow::Result<()> {
         })
         .await?;
 
-    let watcher = tokio::spawn(watch(coordinator.clone(), desk.id.clone(), desk.members.clone(), run_dir.clone(), trace.clone()));
+    let watcher = tokio::spawn(watch(coordinator.clone(), desk.id.clone(), desk.members.clone(), ledger_dir, trace.clone()));
     let outcome = tokio::time::timeout(options.wall, coordinator.run_until_idle()).await;
     tokio::time::sleep(Duration::from_secs(3)).await;
     watcher.abort();
