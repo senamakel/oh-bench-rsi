@@ -75,7 +75,7 @@ uses the frozen defaults. For a local smoke run, add an `env` map with any of:
 | Key | Default | Effect |
 | --- | --- | --- |
 | `LME2_LIMIT` | unset (all 225) | Score only the first N questions of each split |
-| `LME2_ENGINE` | `cortex` | `reference` uses TinyMemory's in-process engine (no CortexDB) |
+| `LME2_ENGINE` | `cortex` | `reference` uses tinymemory-api's in-memory conformance engine (no CortexDB) |
 | `LME2_CONCURRENCY` | `8` | Reader concurrency in the harness |
 | `MEMD_SETTLE_SECS` | `10800` | How long memd waits for CortexDB enrichment to settle |
 | `LME2_MOUNT_ROOT` | the primary checkout | Path mounted into the harness container |
