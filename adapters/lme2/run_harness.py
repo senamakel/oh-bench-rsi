@@ -5,8 +5,9 @@ Usage (inside the harness container, from the official checkout's root on
 
 Importing ``oh_memory`` registers the ``oh_tinymemory`` memory type in the
 official registry. The harness is imported as a module and its reader call is
-wrapped with ``retry.retry_empty``, so an empty reply is asked again instead
-of aborting the evaluation; nothing in the official checkout is edited.
+wrapped with ``retry.retry_empty``: an empty reply is asked again, and one
+that stays empty scores as no answer (as the harness scores a refused request)
+instead of aborting the evaluation. Nothing in the official checkout is edited.
 """
 
 import pathlib
