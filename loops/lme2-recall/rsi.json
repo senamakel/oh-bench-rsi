@@ -6,22 +6,62 @@
     "kind": "git",
     "path": "../../vendor/openhuman/vendor/tinymemory",
     "branch": "rsi/main",
-    "editable": ["crates/tinymemory-tools/", "crates/tinymemory-integrations/"],
-    "frozen": ["crates/tinymemory-api/"],
+    "editable": [
+      "crates/tinymemory-tools/",
+      "crates/tinymemory-integrations/"
+    ],
+    "frozen": [
+      "crates/tinymemory-api/"
+    ],
     "require_test_change": true
   },
   "brief": "brief.md",
-  "hive": { "package": "hive", "lead": "lead", "wall_secs": 3600, "turn_secs": 1200 },
-  "models": { "default": "z-ai/glm-5.3-flash" },
+  "hive": {
+    "package": "hive",
+    "lead": "lead",
+    "wall_secs": 3600,
+    "turn_secs": 1200
+  },
+  "models": {
+    "default": "z-ai/glm-5.3-flash"
+  },
+  "keys": {
+    "ladder": "LADDER_API_KEY"
+  },
   "score": {
-    "scorers": [ { "id": "lme2", "run": "python3 -I scorers/lme2.py", "timeout_secs": 14400 } ],
-    "decide": { "on": "lme2", "test": "sign", "split": "test", "alpha": 0.10 }
+    "scorers": [
+      {
+        "id": "lme2",
+        "run": "python3 -I scorers/lme2.py",
+        "timeout_secs": 14400
+      }
+    ],
+    "decide": {
+      "on": "lme2",
+      "test": "sign",
+      "split": "test",
+      "alpha": 0.1
+    }
   },
   "gate": [
-    { "run": "python3 -I gates/leakage.py" },
-    { "run": "python3 -I gates/green.py", "timeout_secs": 3600 }
+    {
+      "run": "python3 -I gates/leakage.py"
+    },
+    {
+      "run": "python3 -I gates/green.py",
+      "timeout_secs": 3600
+    }
   ],
-  "budget": { "run_usd": 5, "total_usd": 50, "score_reserve_usd": 0.6 },
+  "budget": {
+    "run_usd": 5,
+    "total_usd": 50,
+    "score_reserve_usd": 0.6
+  },
   "epochs": 2,
-  "patience": 2
+  "patience": 2,
+  "env": {
+    "LME2_MEMORY_LLM_URL": "http://host.docker.internal:6969/v1",
+    "LME2_MEMORY_LLM_MODEL": "flash",
+    "LME2_MEMORY_LLM_KEY_ENV": "LADDER_API_KEY"
+  }
 }
