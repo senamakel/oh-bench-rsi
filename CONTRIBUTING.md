@@ -6,66 +6,51 @@ this document is the short path through them.
 
 ## Development Setup
 
-Install a stable Rust toolchain with Rust 2024 support (see `rust-version` in
-`Cargo.toml` for the minimum supported version), initialize the vendored
-submodules, then run the four checks CI runs:
+Install Python 3.11+ and a stable Rust toolchain (for the `tinyrsi` binary and
+the memd adapter), initialize the submodules, then run the checks CI runs:
 
 ```sh
-git submodule update --init --recursive
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo build --all-targets --all-features
-cargo test --all-features
+scripts/bootstrap.sh
+python3 -m unittest discover -s loops/lme2-recall/tests
+OPENROUTER_API_KEY=placeholder cargo run --manifest-path vendor/tinyrsi/Cargo.toml \
+  -p tinyrsi-cli -- check loops/lme2-recall
+cargo build --manifest-path adapters/lme2-memd/Cargo.toml --target-dir target/memd
 ```
 
-CI also requires at least 90% line coverage in every source file. After
-installing `cargo-llvm-cov`, run the same gate locally:
-
-```sh
-.github/scripts/check-file-coverage.sh 90 target/coverage.json
-```
-
-The bundled example should also run:
-
-```sh
-cargo run --example basic
-```
+None of these spends money. A paid run (`tinyrsi run loops/lme2-recall`) is a
+deliberate act with its report committed under `docs/results/`.
 
 ## Making A Change
 
 1. Branch from `main` — never commit directly to it. If you use the `worktree`
    helper, work inside `worktrees/<slug>`.
-2. Put each feature area in its own module directory: `mod.rs` for the module
-   root and public surface, `types.rs` for substantial types, `test.rs` for
-   module-local unit tests. Integration tests belong in `tests/`.
-3. Add a specific variant to the crate error type rather than encoding new
-   failure context into a message string.
+2. Loop changes go in `loops/lme2-recall/`. Keep step scripts standard-library
+   Python with their pure parts unit-tested in `loops/lme2-recall/tests/`.
+3. Never change the measurement (`benchmarks/`, the scorer's models, image,
+   ingest environment or subset) to raise a score.
 4. Add or update tests with every behavior change, covering the failure paths.
-5. Document public items, including `# Errors` and `# Panics` sections.
-6. Update `README.md` and `docs/` in the same commit when behavior, the public
-   API, or usage changes.
+5. Changes to the generic loop machinery belong upstream in tinyrsi; bump
+   `vendor/tinyrsi` in its own commit once merged there.
+6. Update `README.md` and `docs/` in the same commit when behavior or usage
+   changes.
 
-Do not add blanket `#[allow(...)]` attributes, mark tests `#[ignore]`, or relax
-lints to get a green run. Fix the cause, or raise the blocker in the pull
-request.
+Do not skip tests, relax lints, or widen the loop's editable surface to get a
+green run. Fix the cause, or raise the blocker in the pull request.
 
 ## Adding A Dependency
 
-Check whether the standard library or an existing dependency already covers the
-need. If not, add it with a caret range, only the features you need, gated
-behind a Cargo feature when optional, and with a comment saying why it exists.
-Run `cargo deny check all` if you have `cargo-deny` installed; CI runs it
-regardless.
+Loop scripts take no third-party Python packages. For the memd adapter, check
+whether the standard library or an existing dependency already covers the
+need; if not, add it with a caret range, only the features you need, and a
+comment saying why it exists.
 
 ## Pull Request Checklist
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --all-targets --all-features -- -D warnings`
-- [ ] `cargo build --all-targets --all-features`
-- [ ] `cargo test --all-features`
-- [ ] `.github/scripts/check-file-coverage.sh 90 target/coverage.json`
+- [ ] the loop unit tests pass
+- [ ] `tinyrsi check loops/lme2-recall` prints `ok: lme2-recall ...`
+- [ ] the memd adapter builds, when it changed
 - [ ] tests added or updated for behavior changes
-- [ ] documentation updated for public API, architecture, or usage changes
+- [ ] documentation updated for behavior or usage changes
 - [ ] the pull request is focused on one logical change
 
 Open pull requests ready for review rather than as drafts, unless the work
