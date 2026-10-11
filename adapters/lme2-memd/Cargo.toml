@@ -1,10 +1,11 @@
 # The OpenHuman memory daemon for LongMemEval-V2.
 #
-# A standalone package, not a member of the root workspace: it is compiled
+# A standalone package with its own workspace and lockfile: it is compiled
 # once per RSI candidate against *that candidate's* TinyMemory checkout. The
-# paths below point at the incumbent (`vendor/openhuman/vendor/tinymemory`);
-# `scripts/bench/build-memd.sh` writes a copy of this manifest whose three
-# TinyMemory paths point at a candidate worktree instead.
+# paths below point at the vendored TinyMemory
+# (`vendor/openhuman/vendor/tinymemory`); the `lme2` scorer
+# (`loops/lme2-recall/scorers/lme2.py`) writes a copy of this manifest whose
+# three TinyMemory paths point at a candidate worktree instead.
 [package]
 name = "lme2-memd"
 version = "0.1.0"
