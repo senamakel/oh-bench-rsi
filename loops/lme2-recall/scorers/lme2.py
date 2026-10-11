@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Measure one OpenHuman checkout on the frozen LongMemEval-V2 subset.
+"""Score one TinyMemory checkout on the frozen LongMemEval-V2 subset.
 
-    lme2_eval.py --checkout <openhuman dir> --label <name> --run-dir runs/<run>
-                 --gateway http://127.0.0.1:<port> [--engine cortex|reference]
-                 [--limit N]
+tinyrsi runs this as the ``lme2`` scorer of ``loops/lme2-recall`` under its
+step contract: ``$RSI_CANDIDATE`` is the TinyMemory worktree to measure,
+``$RSI_OUT`` the empty output folder, ``$RSI_GATEWAY`` the run's spend
+gateway and ``$RSI_LABEL`` the candidate id. For manual use every input is
+also a flag:
 
-Steps, each logged to ``<run-dir>/<label>/eval.log``:
+    lme2.py --candidate <tinymemory dir> --out <dir> --gateway http://127.0.0.1:<port>
+            [--label <name>] [--engine cortex|reference] [--limit N] [--concurrency N]
+
+``--limit``, ``--engine`` and ``--concurrency`` fall back to ``LME2_LIMIT``,
+``LME2_ENGINE`` and ``LME2_CONCURRENCY`` (set them in ``rsi.json``'s ``env``
+for a smoke run). Steps, each logged to ``<out>/eval.log``:
 
 1. Build ``lme2-memd`` against the checkout's own TinyMemory crates.
 2. Start a fresh CortexDB container whose LLM and embedding traffic goes
@@ -16,10 +23,11 @@ Steps, each logged to ``<run-dir>/<label>/eval.log``:
    result is cached for later candidates.
 3. Run the unmodified official harness in its Linux container with the
    ``oh_tinymemory`` backend, GLM 5.3 Flash as reader and judge, both
-   through the gateway (``/__tag/reader``, ``/__tag/judge``).
+   through the gateway (``/__tag/reader/harness``, ``/__tag/judge/harness``).
 4. Score per split and write ``summary.json``, ``dev_failures.jsonl`` (dev
    only: question, the model's answer, verdict, retrieved pack — never the
-   gold answer) and print ``METRIC lme2_test_accuracy=<x>`` lines.
+   gold answer), ``result.json`` for tinyrsi, and print
+   ``METRIC lme2_<split>_accuracy=<x>`` lines.
 
 Everything here runs locally; the only network egress is the gateway's.
 """
@@ -29,13 +37,15 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
 import time
 import urllib.request
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+# loops/lme2-recall/scorers/lme2.py -> the oh-bench-rsi checkout.
+ROOT = pathlib.Path(__file__).resolve().parents[3]
 BENCH = ROOT / "benchmarks"
 DATA = BENCH / ".cache/lme-v2-data"
 OFFICIAL = BENCH / ".cache/longmemeval-v2"
@@ -47,7 +57,9 @@ HARNESS_IMAGE = "ghcr.io/astral-sh/uv:python3.11-bookworm"
 MODEL = "z-ai/glm-5.3-flash"
 EMBED = "openai/text-embedding-3-small"
 # The whole oh-bench-rsi checkout is mounted at its own path in containers.
-MOUNT_ROOT = pathlib.Path(os.environ.get("OHRSI_MOUNT_ROOT", str(ROOT.parents[1] if ROOT.parent.name == "worktrees" else ROOT)))
+# From a linked worktree (`worktrees/<slug>`) that is the primary checkout,
+# so the shared `benchmarks/.cache` resolves too.
+MOUNT_ROOT = pathlib.Path(os.environ.get("LME2_MOUNT_ROOT", str(ROOT.parents[1] if ROOT.parent.name == "worktrees" else ROOT)))
 # Enrichment throughput settings. CortexDB otherwise enqueues enrichment in
 # 256-event scan chunks with low concurrency, which leaves most of a
 # 1,700-event haystack unenriched for hours. One wave, sixteen workers.
@@ -65,10 +77,16 @@ CORTEX_INGEST_ENV = {
     "CORTEX_ENRICHMENT_LONG_TEXT_MAX_BYTES": "3072",
     "CORTEX_ENRICHMENT_MAX_LLM_CALLS_PER_EVENT": "2",
 }
+# The ingest write path, relative to the TinyMemory checkout.
 WRITE_PATH = [
-    "vendor/tinymemory/crates/tinymemory-api",
-    "vendor/tinymemory/crates/tinymemory-integrations",
+    "crates/tinymemory-api",
+    "crates/tinymemory-integrations",
 ]
+# How many dev failures result.json carries, and how many of one type.
+MAX_FAILURES = 30
+FAILURES_PER_TYPE = 4
+QUESTION_CHARS = 600
+PACK_CHARS = 1500
 
 
 class Log:
@@ -98,8 +116,8 @@ def tree_digest(paths: list[pathlib.Path]) -> str:
     return h.hexdigest()
 
 
-def build_memd(checkout: pathlib.Path, out_dir: pathlib.Path, log: Log) -> pathlib.Path:
-    tm = (checkout / "vendor/tinymemory/crates").resolve()
+def build_memd(tinymemory: pathlib.Path, out_dir: pathlib.Path, log: Log) -> pathlib.Path:
+    tm = (tinymemory / "crates").resolve()
     manifest = (MEMD_SRC / "Cargo.toml").read_text(encoding="utf-8")
     manifest = manifest.replace("../../vendor/openhuman/vendor/tinymemory/crates", str(tm))
     manifest = manifest.replace('path = "src/main.rs"', f'path = "{(MEMD_SRC / "src/main.rs").resolve()}"')
@@ -128,11 +146,11 @@ def docker_gateway(gateway: str) -> str:
     return gateway.replace("127.0.0.1", "host.docker.internal").replace("localhost", "host.docker.internal")
 
 
-def ingest_key(checkout: pathlib.Path, haystack_ids: list[str], engine: str) -> tuple[str, str]:
+def ingest_key(tinymemory: pathlib.Path, haystack_ids: list[str], engine: str) -> tuple[str, str]:
     """The ingest cache key: haystack, engine, image, ingest env and write path."""
     material = json.dumps({
         "haystack": haystack_ids, "engine": engine, "image": CORTEX_IMAGE, "ingest_env": CORTEX_INGEST_ENV,
-        "write_path": tree_digest([checkout / p for p in WRITE_PATH] + [MEMD_SRC / "src/convert.rs", CORTEX_TOML]),
+        "write_path": tree_digest([tinymemory / p for p in WRITE_PATH] + [MEMD_SRC / "src/convert.rs", CORTEX_TOML]),
     }, sort_keys=True)
     return hashlib.sha256(material.encode()).hexdigest()[:24], material
 
@@ -197,8 +215,12 @@ def subset_inputs(subset: dict, limit: int | None, out: pathlib.Path) -> tuple[p
     return qpath, hpath, {qid: split for qid, (split, _) in wanted.items()}
 
 
-def summarize(per_question: pathlib.Path, splits: dict, out: pathlib.Path) -> dict:
-    records = [json.loads(l) for l in per_question.read_text(encoding="utf-8").splitlines() if l.strip()]
+def summarize(records: list[dict], splits: dict) -> tuple[dict, list[dict]]:
+    """Per-split accuracy and the dev failures, from the harness's per-question rows.
+
+    A failure row carries the question, the model's answer, whether it
+    answered "unknown" and the recall pack — never the gold answer.
+    """
     summary = {"questions": len(records), "splits": {}}
     failures = []
     for split in ("dev", "test"):
@@ -220,41 +242,100 @@ def summarize(per_question: pathlib.Path, splits: dict, out: pathlib.Path) -> di
                     failures.append({"question_id": r["question_id"], "question_type": r["question_type"],
                                      "question": r["question_text"], "model_answer": r["response_parsed_boxed"],
                                      "answered_unknown": r["is_unknown"], "retrieved_pack": pack})
-    (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-    with (out / "dev_failures.jsonl").open("w", encoding="utf-8") as f:
-        for row in failures:
-            f.write(json.dumps(row) + "\n")
-    return summary
+    return summary, failures
 
 
-def main() -> None:
+def failure_text(row: dict) -> str:
+    """The Markdown the hive sees for one failed dev question."""
+    pack = row["retrieved_pack"][:PACK_CHARS] or "(empty pack)"
+    unknown = " [answered unknown]" if row["answered_unknown"] else ""
+    return "\n".join([
+        f"Question: {(row['question'] or '').strip()[:QUESTION_CHARS]}",
+        f"Model answer: {row['model_answer'] or '(none)'}{unknown}",
+        "Recall pack the model saw (truncated):",
+        "```",
+        pack,
+        "```",
+    ])
+
+
+def metric_name(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+
+def build_result(summary: dict, failures: list[dict]) -> dict:
+    """tinyrsi's ``result.json``: dev accuracy as the score, per-item 0/1
+    scores for both splits, a sample of dev failures, and dev/test metrics."""
+    dev, test = summary["splits"]["dev"], summary["splits"]["test"]
+    if dev["accuracy"] is None:
+        raise RuntimeError("no dev questions were scored")
+    shown, per_type = [], {}
+    for row in failures:
+        kind = row["question_type"]
+        if per_type.get(kind, 0) >= FAILURES_PER_TYPE:
+            continue
+        per_type[kind] = per_type.get(kind, 0) + 1
+        shown.append({"id": row["question_id"], "type": kind, "text": failure_text(row)})
+        if len(shown) >= MAX_FAILURES:
+            break
+    metrics = {"dev_accuracy": dev["accuracy"]}
+    if test["accuracy"] is not None:
+        metrics["test_accuracy"] = test["accuracy"]
+    if dev["pack_tokens_mean"] is not None:
+        metrics["dev_pack_tokens_mean"] = dev["pack_tokens_mean"]
+    for kind, row in dev["by_type"].items():
+        metrics[f"dev_accuracy_{metric_name(kind)}"] = row["accuracy"]
+    return {
+        "score": dev["accuracy"],
+        "splits": {split: {"items": {qid: float(s) for qid, s in summary["splits"][split]["scores"].items()}}
+                   for split in ("dev", "test")},
+        "failures": shown,
+        "metrics": metrics,
+    }
+
+
+def env_int(name: str) -> int | None:
+    value = os.environ.get(name, "").strip()
+    return int(value) if value else None
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--checkout", default=str(ROOT / "vendor/openhuman"))
-    parser.add_argument("--label", required=True)
-    parser.add_argument("--run-dir", required=True)
-    parser.add_argument("--gateway", required=True)
-    parser.add_argument("--engine", choices=["cortex", "reference"], default="cortex")
-    parser.add_argument("--limit", type=int, default=None, help="first N questions of each split (smoke runs)")
-    parser.add_argument("--concurrency", type=int, default=8)
-    args = parser.parse_args()
+    parser.add_argument("--candidate", default=os.environ.get("RSI_CANDIDATE") or str(ROOT / "vendor/openhuman/vendor/tinymemory"),
+                        help="TinyMemory checkout to measure (default: $RSI_CANDIDATE, else the vendored one)")
+    parser.add_argument("--out", default=os.environ.get("RSI_OUT"), help="output folder (default: $RSI_OUT)")
+    parser.add_argument("--gateway", default=os.environ.get("RSI_GATEWAY"), help="spend gateway base (default: $RSI_GATEWAY)")
+    parser.add_argument("--label", default=os.environ.get("RSI_LABEL") or "manual")
+    parser.add_argument("--engine", choices=["cortex", "reference"], default=os.environ.get("LME2_ENGINE") or "cortex")
+    parser.add_argument("--limit", type=int, default=env_int("LME2_LIMIT"), help="first N questions of each split (smoke runs)")
+    parser.add_argument("--concurrency", type=int, default=env_int("LME2_CONCURRENCY") or 8)
+    args = parser.parse_args(argv)
+    if not args.out:
+        parser.error("--out or $RSI_OUT is required")
+    if not args.gateway:
+        parser.error("--gateway or $RSI_GATEWAY is required")
+    return args
 
-    checkout = pathlib.Path(args.checkout).resolve()
-    out = (pathlib.Path(args.run_dir) / args.label).resolve()
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    tinymemory = pathlib.Path(args.candidate).resolve()
+    out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     log = Log(out / "eval.log")
     subset = json.loads((ROOT / "campaigns/lme2/subset.json").read_text(encoding="utf-8"))
     qpath, hpath, splits = subset_inputs(subset, args.limit, out / "inputs")
 
-    log(f"building lme2-memd against {checkout}")
-    memd = build_memd(checkout, out, log)
+    log(f"building lme2-memd against {tinymemory}")
+    memd = build_memd(tinymemory, out, log)
 
     haystack_ids = json.loads(hpath.read_text())[next(iter(splits))]
-    key, key_material = ingest_key(checkout, haystack_ids, args.engine)
+    key, key_material = ingest_key(tinymemory, haystack_ids, args.engine)
     cache = ROOT / "runs/ingest-cache" / key
     hit = args.engine == "cortex" and (cache / "COMPLETE").exists()
     log(f"ingest cache {key}: {'hit' if hit else 'miss'}")
 
-    cortex_name = f"ohrsi-{args.label}-cortex".replace("/", "-")
+    cortex_name = "lme2-" + re.sub(r"[^A-Za-z0-9_.-]", "-", args.label) + "-cortex"
     procs = []
     env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "TMPDIR")}
     try:
@@ -282,9 +363,13 @@ def main() -> None:
         harness_out = out / "harness"
         shutil.rmtree(harness_out, ignore_errors=True)
         gw = docker_gateway(args.gateway)
+        # tinyrsi's step folder lives in its run store, outside the checkout.
+        mounts = ["-v", f"{MOUNT_ROOT}:{MOUNT_ROOT}"]
+        if not out.is_relative_to(MOUNT_ROOT):
+            mounts += ["-v", f"{out}:{out}"]
         cmd = [
             "docker", "run", "--rm", "--add-host", "host.docker.internal:host-gateway",
-            "-v", f"{MOUNT_ROOT}:{MOUNT_ROOT}", "-w", str(ROOT),
+            *mounts, "-w", str(ROOT),
             "-e", "OPENAI_API_KEY=dummy", "-e", f"HF_HOME={BENCH / '.cache/hf'}",
             HARNESS_IMAGE, str(VENV_PY), str(ROOT / "adapters/lme2/run_harness.py"), str(OFFICIAL),
             "--domain", subset["domain"], "--questions-path", str(qpath), "--haystack-path", str(hpath),
@@ -318,13 +403,17 @@ def main() -> None:
         shutil.rmtree(out / "cortex-data", ignore_errors=True)
 
     per_question = next(harness_out.rglob("per_question.jsonl"))
-    summary = summarize(per_question, splits, out)
-    tm = checkout / "vendor/tinymemory"
-    head = subprocess.run(["git", "-C", str(tm), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    dirty = bool(subprocess.run(["git", "-C", str(tm), "status", "--porcelain"], capture_output=True, text=True).stdout.strip())
-    summary.update({"label": args.label, "checkout": str(checkout), "ingest_cache": key, "ingest_cache_hit": hit,
+    records = [json.loads(l) for l in per_question.read_text(encoding="utf-8").splitlines() if l.strip()]
+    summary, failures = summarize(records, splits)
+    with (out / "dev_failures.jsonl").open("w", encoding="utf-8") as f:
+        for row in failures:
+            f.write(json.dumps(row) + "\n")
+    head = subprocess.run(["git", "-C", str(tinymemory), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    dirty = bool(subprocess.run(["git", "-C", str(tinymemory), "status", "--porcelain"], capture_output=True, text=True).stdout.strip())
+    summary.update({"label": args.label, "checkout": str(tinymemory), "ingest_cache": key, "ingest_cache_hit": hit,
                     "tinymemory_head": head, "tinymemory_dirty": dirty, "limit": args.limit})
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    (out / "result.json").write_text(json.dumps(build_result(summary, failures), indent=2) + "\n", encoding="utf-8")
     for split in ("dev", "test"):
         acc = summary["splits"][split]["accuracy"]
         if acc is not None:
