@@ -36,41 +36,51 @@ These are non-negotiable for humans, agents, and the loop's own proposer.
 5. **Spend is capped.** Respect each campaign's `budget.usd_cap` and read the
    live budget ledger before a paid run. Never loop on paid calls unattended
    without a cap.
-6. **Ship upstream.** An accepted candidate becomes a PR to
-   `tinyhumansai/openhuman` (or `tinyhumansai/tinymemory`) with a regression
-   test, then this repo bumps the gitlink. Never edit vendored code from this
-   repository's history.
+6. **Stay local.** Candidates and promotions live on local `rsi/*` branches
+   in the vendored repositories (ADR 0004). The harness never pushes, merges,
+   or opens pull requests; a human upstreams promoted diffs, each with its
+   regression test, from the run reports. Never commit vendored code into
+   this repository's history.
 7. **Keep OpenHuman green.** A candidate that fails OpenHuman's or
    TinyMemory's own tests is rejected regardless of its score.
 
 ## Project Structure
 
 ```text
-Cargo.toml              # virtual workspace: members, [workspace.package],
-                        # [workspace.dependencies], [workspace.lints]
+Cargo.toml              # virtual workspace (crates/* only; CI builds it without submodules)
 clippy.toml             # product names clippy's doc_markdown accepts
 crates/
-└── ohrsi/              # the RSI driver
-    ├── src/
-    │   ├── lib.rs      # crate docs + the entire public surface
-    │   ├── main.rs     # `ohrsi` binary, a thin wrapper over `cli::run`
-    │   ├── error/      # crate-wide `Error` and `Result<T>`
-    │   ├── campaign/   # manifest schema and validation
-    │   ├── workspace/  # repo root discovery, submodule and path checks
-    │   └── cli/        # `check` and `list` commands
-    └── tests/          # integration tests against the public API and binary
-campaigns/              # one `<name>.toml` per campaign (see docs/specs/campaigns.md)
-scripts/                # bootstrap and benchmark adapters
-runs/                   # git-ignored run output
-vendor/openhuman/       # pinned OpenHuman — the system under improvement
-vendor/tinyrsi/         # pinned tinyrsi — the improvement loop library
+├── ohrsi/              # campaign manifests: schema, validation, `ohrsi check|list`
+└── ohrsi-gateway/      # spend-capped OpenRouter proxy: the only path to a model
+swarm/                  # standalone crate: runs a hive package as OpenHuman agents
+hives/memory-rsi/       # the swarm, in the tinyhivemind hive language
+adapters/
+├── lme2-memd/          # standalone crate: OpenHuman TinyMemory over loopback HTTP,
+│                       # built per candidate against its TinyMemory checkout
+└── lme2/               # the official harness's `Memory` backend + runner
+scripts/
+├── bench/              # with-gateway.sh, lme2_eval.py, lme2_subset.py
+└── rsi/                # epoch.py (one run), gate.py, decide.py, brief.py
+campaigns/              # campaign manifests; lme2/subset.json is the frozen subset
+runs/                   # git-ignored: ledgers, meters, traces, candidates, ingest cache
+vendor/openhuman/       # pinned OpenHuman (TinyMemory at vendor/tinymemory)
+vendor/tinyrsi/         # pinned tinyrsi (tinyhivemind nested; rsi-viz in apps/)
 benchmarks/             # pinned openhuman-benchmarks — frozen measurement
-docs/
-├── memory-benchmarks.md  # benchmarks, baselines, known failures, targets
-├── specs/              # behavior and architecture specifications
-├── plans/              # test-first implementation plans
-└── adr/                # immutable architecture decision records
+docs/                   # memory-benchmarks.md, specs/, plans/, adr/, results/
 ```
+
+### Running
+
+```sh
+scripts/bootstrap.sh                                  # submodules, checks
+cargo build --manifest-path swarm/Cargo.toml --target-dir target/swarm
+scripts/bench/with-gateway.sh <run> 5 -- python3 scripts/rsi/epoch.py --run <run>
+cd vendor/tinyrsi/apps/rsi-viz && RSI_RUN_ROOT=../../../../runs npm run dev
+```
+
+The LongMemEval-V2 harness's lockfile is Linux-only; it runs in the
+`ghcr.io/astral-sh/uv:python3.11-bookworm` container, which reaches the host's
+loopback gateway and memd as `host.docker.internal`.
 
 Each feature area belongs in a focused module directory under a crate's `src/`.
 A module root explains the module, wires its pieces together, and exposes the
@@ -170,7 +180,9 @@ releases are reproducible.
 ### Vendored dependencies
 
 Three submodules are pinned by gitlink: `vendor/openhuman`, `vendor/tinyrsi`,
-and `benchmarks` (openhuman-benchmarks). Initialize them with
+and `benchmarks` (openhuman-benchmarks). During a campaign the vendored
+TinyMemory, tinyrsi and tinyhivemind carry local `rsi/*` draft branches
+(ADR 0004); their gitlinks here stay at the pin. Initialize them with
 `scripts/bootstrap.sh`. OpenHuman's own nested submodules (TinyMemory lives at
 `vendor/openhuman/vendor/tinymemory`) are initialized recursively; the
 benchmarks' nested OpenHuman copy is not used.
