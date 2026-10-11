@@ -1,4 +1,12 @@
-[submodule "vendor/tinybus"]
-	path = vendor/tinybus
-	url = https://github.com/tinyhumansai/tinybus
+[submodule "vendor/openhuman"]
+	path = vendor/openhuman
+	url = https://github.com/tinyhumansai/openhuman
+	branch = main
+[submodule "vendor/tinyrsi"]
+	path = vendor/tinyrsi
+	url = https://github.com/tinyhumansai/tinyrsi
+	branch = main
+[submodule "benchmarks"]
+	path = benchmarks
+	url = https://github.com/tinyhumansai/openhuman-benchmarks
 	branch = main

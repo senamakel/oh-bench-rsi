@@ -1,26 +1,25 @@
 # Roadmap
 
-Replace this file with the real plan for the crate generated from this
-template, or delete it if the project does not need a public roadmap.
-
-Keep it short and honest: what exists, what is next, and what is deliberately
-out of scope. A roadmap that lists everything is a roadmap nobody trusts.
-
 ## Shipped
 
-- module layout, crate-wide error type, and the public re-export surface
-- lint configuration in `[lints]`, enforced identically locally and in CI
-- CI: format, clippy, build, test, per-file coverage, rustdoc, MSRV, and
-  supply-chain checks
-- a manual release workflow that versions, tags, publishes to crates.io, and
-  creates a GitHub release with crate and TinyBus runtime/module assets
+- Repository scaffold: OpenHuman, tinyrsi and openhuman-benchmarks pinned as
+  submodules; `ohrsi` crate with validated campaign manifests and
+  `ohrsi check` / `ohrsi list`.
+- Two draft campaigns from the memory audit findings: `memory-recall-pack` and
+  `memory-temporal-recall`.
 
 ## Next
 
-- the first real feature area, replacing the placeholder `greeting` module
-- module-level `README.md` and `docs/spec/` entries as modules grow
+See [`docs/plans/rsi-memory-loop.md`](docs/plans/rsi-memory-loop.md):
 
-## Out Of Scope
+1. `scripts/bench/memory-metric.sh` — run the frozen memory suite against a
+   candidate checkout and print `METRIC memory_accuracy=<value>`.
+2. Candidate checkouts: OpenHuman git worktrees under `runs/`.
+3. Link tinyrsi's script loop and drive one campaign end to end.
+4. Promote accepted candidates as upstream PRs to OpenHuman / TinyMemory.
+5. Extend to LongMemEval-V2 once an OH `Memory.insert/query` adapter exists.
 
-- anything that cannot be tested deterministically
-- convenience wrappers that hide the crate's error taxonomy from callers
+## Out of scope
+
+- Editing benchmarks, datasets, judges or scorers to raise a score.
+- Unbounded paid runs: every campaign carries a hard spend cap.

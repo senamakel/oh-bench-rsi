@@ -10,6 +10,7 @@ where it cannot drift.
 ```text
 docs/
 ├── README.md      # this index
+├── memory-benchmarks.md  # suites, baselines, failures → campaigns
 ├── specs/         # behavior and architecture specifications
 ├── plans/         # implementation plans derived from approved specs
 └── adr/           # architecture decision records, numbered and immutable
@@ -28,10 +29,8 @@ docs/
 Complex modules also carry a module-level `README.md` inside `src/<module>/`
 covering their design, public surface, and important constraints.
 
-The current module-release contract is in
-[`specs/tinybus-module-release.md`](specs/tinybus-module-release.md), with its
-implementation sequence in
-[`plans/tinybus-module-release.md`](plans/tinybus-module-release.md).
+Start with [`memory-benchmarks.md`](memory-benchmarks.md), then the
+[RSI loop spec](specs/rsi-memory-loop.md) and its [plan](plans/rsi-memory-loop.md).
 
 ## Conventions
 

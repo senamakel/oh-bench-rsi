@@ -1,0 +1,49 @@
+# Keep the evidence recall already found.
+#
+# FINDINGS.md #2 in benchmarks/memory: for LongMemEval 561fabcd the retrieved
+# turn naming "Fissionator" was gathered but dropped when the pack was trimmed
+# to budget, and a bigger budget alone did not fix the answer. The levers are
+# how TinyMemory gathers, ranks, excerpts and renders hits into the pack.
+name = "memory-recall-pack"
+brief = """
+Raise OpenHuman's answer accuracy on the pinned memory audit (LongMemEval-S and
+LoCoMo subsets) by improving how TinyMemory gathers, ranks, excerpts and renders
+recalled evidence into the memory pack. A retrieved fact that answers the
+question must survive into the rendered pack within the normal token budget.
+Do not change the benchmark, the questions, the judge, or the token budget.
+Every change must keep TinyMemory's own tests green.
+"""
+
+[benchmark]
+workdir = "."
+# Runs the frozen benchmarks/memory suite against the candidate checkout and
+# prints `METRIC memory_accuracy=<value>`. Delivered in phase 1 of
+# docs/plans/rsi-memory-loop.md.
+command = ["scripts/bench/memory-metric.sh", "--arm", "oh-tinymemory-cortex-direct"]
+env = ["OPENROUTER_API_KEY"]
+timeout_secs = 7200
+
+[metric]
+# Question-weighted mean of the official LongMemEval judge score and the
+# official LoCoMo category F1, for the OpenHuman memory arm only.
+name = "memory_accuracy"
+direction = "maximize"
+
+[surface]
+editable = [
+    "vendor/openhuman/vendor/tinymemory/crates/tinymemory-tools/src/recall/gather.rs",
+    "vendor/openhuman/vendor/tinymemory/crates/tinymemory-tools/src/recall/render.rs",
+    "vendor/openhuman/vendor/tinymemory/crates/tinymemory-tools/src/recall/types.rs",
+]
+# The public memory API is a contract with OpenHuman core and other engines.
+frozen = ["vendor/openhuman/vendor/tinymemory/crates/tinymemory-api"]
+
+[evaluation]
+seeds = [27, 28, 29]
+
+[budget]
+# The original memory audit was authorized at $10 total; read
+# benchmarks/results/*/budget.json before raising this.
+usd_cap = 10.0
+max_epochs = 4
+proposals_per_epoch = 2
