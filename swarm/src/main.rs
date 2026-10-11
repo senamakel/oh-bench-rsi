@@ -30,7 +30,7 @@ use openhuman_embed::{
     Access, AgentDefinitionSpec, AgentSpec, GroupMode, Provider, Runtime, ToolGroups, ToolScopeSpec, Workspace,
 };
 use serde_json::{Value, json};
-use tinyhivemind_hives::{Coordinator, CoordinatorOptions, Destination, HiveInfo, SendMessage, SqliteStorage};
+use tinyhivemind_hives::{Coordinator, Destination, HiveInfo, SendMessage, SqliteStorage};
 use tinyhivemind_openhuman::OpenHumanHost;
 
 use crate::trace::{Trace, clip};
@@ -171,7 +171,15 @@ async fn run(options: Options) -> anyhow::Result<()> {
         .await?;
 
     let storage = Arc::new(SqliteStorage::open(swarm_dir.join("hive.db"))?);
-    let coordinator = Coordinator::new(runtime.runtime_id().into(), storage, CoordinatorOptions::default()).await?;
+    // The package's coordinator settings (round width, turn walls), not the
+    // library default of one concurrent turn: with width 1 an open episode's
+    // re-nudged seat always sorts first and starves direct deliveries.
+    let coordinator = Coordinator::new(
+        runtime.runtime_id().into(),
+        storage,
+        tinyhivemind_openhuman::language::coordinator_options(&lowered.coordinator),
+    )
+    .await?;
     let host = OpenHumanHost::new(runtime.runtime_id().into(), coordinator.clone())?
         .with_turn_timeout(options.turn)?
         .with_hooks(Arc::new(hooks::SwarmHooks { trace: trace.clone() }))?;
