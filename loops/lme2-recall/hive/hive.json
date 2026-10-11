@@ -37,7 +37,7 @@
         "max_iterations": 40,
         "temperature": 0.0
       },
-      "model": "z-ai/glm-5.3-flash",
+      "model": "flash",
       "tools": {
         "allow": [
           "file_read",
@@ -70,7 +70,7 @@
         "max_iterations": 120,
         "temperature": 0.0
       },
-      "model": "z-ai/glm-5.3-flash",
+      "model": "flash",
       "tools": {
         "allow": [
           "file_read",

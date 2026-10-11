@@ -12,8 +12,8 @@
   },
   "brief": "brief.md",
   "hive": { "package": "hive", "lead": "lead", "wall_secs": 3600, "turn_secs": 1200 },
-  "models": { "default": "z-ai/glm-5.3-flash" },
-  "keys": { "ladder": "LADDER_API_KEY" },
+  "models": { "default": "flash" },
+  "keys": { "openrouter": "LADDER_API_KEY", "embeddings": "OPENROUTER_API_KEY" },
   "score": {
     "scorers": [ { "id": "lme2", "run": "python3 -I scorers/lme2.py", "timeout_secs": 14400 } ],
     "decide": { "on": "lme2", "test": "sign", "split": "test", "alpha": 0.10 }
@@ -22,12 +22,15 @@
     { "run": "python3 -I gates/leakage.py" },
     { "run": "python3 -I gates/green.py", "timeout_secs": 3600 }
   ],
-  "budget": { "run_usd": 5, "total_usd": 50, "score_reserve_usd": 0.6 },
+  "budget": {
+    "run_usd": 5, "total_usd": 50, "score_reserve_usd": 0.6,
+    "prices": { "flash": { "prompt_per_mtok": 0.30, "completion_per_mtok": 1.00, "provider": "*" } }
+  },
   "epochs": 2,
   "patience": 2,
   "env": {
-    "LME2_MEMORY_LLM_URL": "http://host.docker.internal:6969/v1",
-    "LME2_MEMORY_LLM_MODEL": "flash",
-    "LME2_MEMORY_LLM_KEY_ENV": "LADDER_API_KEY"
+    "LME2_MODEL": "flash",
+    "LME2_EMBEDDING_URL": "https://openrouter.ai/api/v1",
+    "LME2_EMBEDDING_KEY_ENV": "OPENROUTER_API_KEY"
   }
 }

@@ -499,7 +499,7 @@ def main(argv: list[str] | None = None) -> None:
             f.write(json.dumps(row) + "\n")
     head = subprocess.run(["git", "-C", str(tinymemory), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = bool(subprocess.run(["git", "-C", str(tinymemory), "status", "--porcelain"], capture_output=True, text=True).stdout.strip())
-    summary.update({"label": args.label, "checkout": str(tinymemory), "ingest_cache": key, "ingest_cache_hit": hit,
+    summary.update({"label": args.label, "model": model, "checkout": str(tinymemory), "ingest_cache": key, "ingest_cache_hit": hit,
                     "tinymemory_head": head, "tinymemory_dirty": dirty, "limit": args.limit})
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     (out / "result.json").write_text(json.dumps(build_result(summary, failures), indent=2) + "\n", encoding="utf-8")
