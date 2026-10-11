@@ -20,4 +20,5 @@ After the specification is accepted, create a linked implementation plan in
 [`../plans/`](../plans/README.md). Keep code snippets small enough to clarify
 the contract; production code still belongs under `src/`.
 
-Current specs: [`rsi-memory-loop.md`](rsi-memory-loop.md), [`campaigns.md`](campaigns.md).
+Current spec: [`rsi-memory-loop.md`](rsi-memory-loop.md). Superseded:
+[`campaigns.md`](campaigns.md) (replaced by the tinyrsi loop folder, ADR 0007).
