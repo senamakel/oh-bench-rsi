@@ -3,7 +3,7 @@
 //! ```text
 //! ohrsi-gateway --run-dir runs/<run> [--ledger-total runs/ledger-total.json]
 //!               [--run-limit 5] [--total-limit 50] [--listen 127.0.0.1:8790]
-//!               [--upstream https://openrouter.ai/api/v1]
+//!               [--upstream https://openrouter.ai/api/v1] [--capture]
 //! ```
 //!
 //! The provider key comes from `OPENROUTER_API_KEY` and never appears in
@@ -36,6 +36,8 @@ pub struct Options {
     pub listen: SocketAddr,
     /// Upstream base URL.
     pub upstream: String,
+    /// Write every request body under `<run-dir>/captures/`.
+    pub capture: bool,
 }
 
 /// Parses arguments (without the program name).
@@ -54,6 +56,7 @@ pub fn parse(args: &[String]) -> Result<Options> {
         total_limit: 50.0,
         listen: SocketAddr::from(([127, 0, 0, 1], 8790)),
         upstream: "https://openrouter.ai/api/v1".to_owned(),
+        capture: false,
     };
     let mut iter = args.iter();
     while let Some(flag) = iter.next() {
@@ -78,6 +81,7 @@ pub fn parse(args: &[String]) -> Result<Options> {
                     .map_err(|_| Error::Usage(format!("--listen: {text:?} is not an address")))?;
             }
             "--upstream" => options.upstream = value()?,
+            "--capture" => options.capture = true,
             other => return Err(Error::Usage(format!("unknown argument {other:?}"))),
         }
     }
@@ -117,6 +121,7 @@ impl Bound {
             api_key,
             prices: PriceTable::standard(),
             limits: Limits::default(),
+            capture_dir: options.capture.then(|| options.run_dir.join("captures")),
         };
         let listener = tokio::net::TcpListener::bind(options.listen)
             .await

@@ -107,3 +107,28 @@ fn embeddings_reserve_prompt_side_only() {
     assert_eq!(Endpoint::Embeddings.path(), "embeddings");
     assert_eq!(Endpoint::Chat.path(), "chat/completions");
 }
+
+#[test]
+fn pins_reasoning_effort_unless_the_client_chose() {
+    let prepared = chat(json!({"model": GLM_FLASH, "messages": []})).unwrap();
+    assert_eq!(prepared.body["reasoning"], json!({"effort": "low"}));
+    let prepared =
+        chat(json!({"model": GLM_FLASH, "messages": [], "reasoning_effort": "high"})).unwrap();
+    assert_eq!(prepared.body["reasoning"], json!({"effort": "high"}));
+    assert!(prepared.body.get("reasoning_effort").is_none());
+    let prepared =
+        chat(json!({"model": GLM_FLASH, "messages": [], "reasoning": {"enabled": false}})).unwrap();
+    assert_eq!(prepared.body["reasoning"], json!({"enabled": false}));
+    let none = Limits {
+        default_reasoning: None,
+        ..Limits::default()
+    };
+    let prepared = prepare(
+        Endpoint::Chat,
+        json!({"model": GLM_FLASH, "messages": []}),
+        &PriceTable::standard(),
+        none,
+    )
+    .unwrap();
+    assert!(prepared.body.get("reasoning").is_none());
+}

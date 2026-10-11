@@ -76,6 +76,7 @@ impl Harness {
             total_limit,
             listen: "127.0.0.1:0".parse().unwrap(),
             upstream: format!("http://{upstream_addr}/v1"),
+            capture: true,
         };
         let bound = Bound::open(&options, "real-key".into()).await.unwrap();
         let base = format!("http://{}", bound.addr);
@@ -163,6 +164,10 @@ async fn forwards_with_the_real_key_and_charges_reported_cost() {
     assert_eq!(rows[0]["phase"], "reader");
     assert_eq!(rows[0]["seat"], "harness");
     assert_eq!(rows[0]["candidate"], "c1");
+    let captured = std::fs::read_dir(h.dir.join("run-1/captures"))
+        .unwrap()
+        .count();
+    assert_eq!(captured, 1);
 }
 
 #[tokio::test]
@@ -323,6 +328,7 @@ async fn a_second_gateway_cannot_share_the_total_ledger() {
         total_limit: 50.0,
         listen: "127.0.0.1:0".parse().unwrap(),
         upstream: "http://127.0.0.1:9/v1".into(),
+        capture: false,
     };
     let error = Bound::open(&options, "k".into()).await.unwrap_err();
     assert!(matches!(error, ohrsi_gateway::Error::Locked(_)), "{error}");
@@ -339,6 +345,7 @@ async fn unreachable_upstreams_return_502_and_keep_the_reservation() {
         total_limit: 50.0,
         listen: "127.0.0.1:0".parse().unwrap(),
         upstream: "http://127.0.0.1:1/v1".into(),
+        capture: false,
     };
     let bound = Bound::open(&options, "k".into()).await.unwrap();
     let base = format!("http://{}", bound.addr);

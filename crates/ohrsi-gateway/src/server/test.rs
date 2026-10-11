@@ -34,6 +34,7 @@ fn parses_defaults_and_overrides() {
     assert!((options.run_limit - 2.5).abs() < 1e-12);
     assert_eq!(options.ledger_total, std::path::PathBuf::from("t.json"));
     assert_eq!(options.upstream, "http://127.0.0.1:9/v1");
+    assert!(options.capture);
 }
 
 #[test]

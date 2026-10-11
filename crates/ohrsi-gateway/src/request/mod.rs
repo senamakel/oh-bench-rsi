@@ -43,6 +43,10 @@ pub struct Limits {
     pub default_max_tokens: u64,
     /// The largest `max_tokens` the gateway forwards.
     pub max_tokens_cap: u64,
+    /// Reasoning effort applied when the client names none. Hidden
+    /// reasoning is billed as completion tokens; the earlier memory audit
+    /// pinned `low` for the same reason.
+    pub default_reasoning: Option<&'static str>,
 }
 
 impl Default for Limits {
@@ -50,6 +54,7 @@ impl Default for Limits {
         Self {
             default_max_tokens: 8_192,
             max_tokens_cap: 16_384,
+            default_reasoning: Some("low"),
         }
     }
 }
@@ -111,6 +116,16 @@ pub fn prepare(
         let max_tokens = requested.clamp(1, limits.max_tokens_cap);
         map.insert("max_tokens".into(), json!(max_tokens));
         map.insert("usage".into(), json!({ "include": true }));
+        // OpenAI clients spell it `reasoning_effort`; OpenRouter reads
+        // `reasoning.effort`. Keep an explicit client choice, else the default.
+        let effort = map
+            .remove("reasoning_effort")
+            .and_then(|v| v.as_str().map(str::to_owned));
+        if !map.contains_key("reasoning") {
+            if let Some(effort) = effort.as_deref().or(limits.default_reasoning) {
+                map.insert("reasoning".into(), json!({ "effort": effort }));
+            }
+        }
         stream = map.get("stream").and_then(Value::as_bool).unwrap_or(false);
         if stream {
             map.insert("stream_options".into(), json!({ "include_usage": true }));

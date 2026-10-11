@@ -42,6 +42,9 @@ pub struct GatewayConfig {
     pub prices: PriceTable,
     /// Completion-length limits.
     pub limits: Limits,
+    /// When set, every forwarded request body is written here as
+    /// `<seq>-<phase>.json`, for inspecting what a client actually sends.
+    pub capture_dir: Option<std::path::PathBuf>,
 }
 
 /// A running gateway's shared state.
@@ -51,6 +54,7 @@ pub struct Gateway {
     budgets: Mutex<Budgets>,
     meter: Meter,
     client: reqwest::Client,
+    sequence: std::sync::atomic::AtomicU64,
 }
 
 impl Gateway {
@@ -62,6 +66,7 @@ impl Gateway {
             budgets: Mutex::new(budgets),
             meter,
             client: reqwest::Client::new(),
+            sequence: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -107,6 +112,30 @@ impl Gateway {
             .settle(reservation, cost)
             .err()
             .map(|error| error.to_string())
+    }
+
+    fn capture(&self, tags: &Tags, body: &Value) {
+        let Some(dir) = &self.config.capture_dir else {
+            return;
+        };
+        let seq = self
+            .sequence
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let phase = if tags.phase.is_empty() {
+            "untagged"
+        } else {
+            &tags.phase
+        };
+        let record = json!({ "tags": tags, "body": body });
+        let written = std::fs::create_dir_all(dir).and_then(|()| {
+            std::fs::write(
+                dir.join(format!("{seq:06}-{phase}.json")),
+                record.to_string(),
+            )
+        });
+        if let Err(error) = written {
+            eprintln!("ohrsi-gateway: capture: {error}");
+        }
     }
 
     fn record(&self, row: &MeterRow) {
@@ -249,6 +278,7 @@ struct Outcome {
 
 async fn forward(gw: Arc<Gateway>, endpoint: Endpoint, tags: Tags, body: Bytes) -> Response {
     let started = Instant::now();
+    let capture_tags = tags.clone();
     let row = move |model: &str, outcome: Outcome| MeterRow {
         at_ms: now_ms(),
         tags: tags.clone(),
@@ -285,6 +315,7 @@ async fn forward(gw: Arc<Gateway>, endpoint: Endpoint, tags: Tags, body: Bytes) 
         Ok(prepared) => prepared,
         Err(error) => return refuse("", &error),
     };
+    gw.capture(&capture_tags, &prepared.body);
     let reservation = match gw.reserve(prepared.reserve_usd) {
         Ok(reservation) => reservation,
         Err(error) => return refuse(&prepared.model, &error),
