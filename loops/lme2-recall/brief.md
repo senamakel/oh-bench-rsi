@@ -3,10 +3,10 @@
 TinyMemory builds the recall pack OpenHuman injects before a turn. It is
 measured on a frozen LongMemEval-V2 web subset: browsing trajectories are
 ingested through TinyMemory into a local CortexDB, then questions are answered
-from the pack alone. The brief is built only from the dev split: accuracy by
+from the pack alone. The evidence below comes from the dev split: accuracy by
 question type and a sample of failed dev questions with the model's answer and
-the recall pack it was given. Gold answers and every test-split detail stay
-out.
+the recall pack it was given. Gold answers and per-question test results never
+appear; promotion is decided on the held-out test split only.
 
 ## Where we are
 
