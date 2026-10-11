@@ -93,8 +93,10 @@ tinyrsi run   loops/lme2-recall      # UI on http://127.0.0.1:8787
 tinyrsi runs                         # every run; `tinyrsi show lme2-recall/<id>`
 ```
 
-`tinyrsi run` needs `OPENROUTER_API_KEY` and `LADDER_API_KEY` (CortexDB's chat
-calls go to the local LLM ladder router on port 6969) in the environment or in
+`tinyrsi run` runs every chat call on the local LLM ladder router's `flash`
+rung: start it as `TINYRSI_UPSTREAM=http://127.0.0.1:6969/v1 tinyrsi run
+loops/lme2-recall`. It needs `LADDER_API_KEY` (the gateway's key) and
+`OPENROUTER_API_KEY` (CortexDB's embeddings only) in the environment or in
 `loops/lme2-recall/.env`, Docker, and a populated `benchmarks/.cache`. Runs are
 stored in `~/.tinyrsi` (or `$TINYRSI_HOME`); the ingest cache stays in
 `runs/ingest-cache/`. The LongMemEval-V2 harness's lockfile is Linux-only; it

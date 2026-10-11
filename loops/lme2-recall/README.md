@@ -9,7 +9,8 @@ LongMemEval-V2 web subset. This folder is a
 cargo install --path vendor/tinyrsi/crates/tinyrsi-cli
 scripts/bootstrap.sh                 # submodules, TinyMemory's local rsi/main
 tinyrsi check loops/lme2-recall      # prints `ok: lme2-recall ...`
-tinyrsi run   loops/lme2-recall      # paid: needs OPENROUTER_API_KEY, LADDER_API_KEY and Docker
+TINYRSI_UPSTREAM=http://127.0.0.1:6969/v1 \
+  tinyrsi run loops/lme2-recall       # needs LADDER_API_KEY, OPENROUTER_API_KEY, Docker
 ```
 
 `tinyrsi run` serves its UI on `http://127.0.0.1:8787` while it works and
@@ -67,25 +68,36 @@ settled, so the queue is paid for once), and writes into `$RSI_OUT`:
 
 It also prints `METRIC lme2_dev_accuracy=…` and `METRIC lme2_test_accuracy=…`.
 
-## Memory model calls go to the ladder
+## Every chat call runs on the ladder's `flash` rung
 
-CortexDB's chat calls (fact extraction, answers, verification) go to the
-local LLM ladder router (`http://127.0.0.1:6969`, model `flash`, the same GLM
-5.3 Flash on surplus capacity, at no cost) instead of the spend gateway: `rsi.json`'s
-`env` sets `LME2_MEMORY_LLM_URL`, `LME2_MEMORY_LLM_MODEL` and
-`LME2_MEMORY_LLM_KEY_ENV`, and its `keys` entry `"ladder": "LADDER_API_KEY"`
-hands the router's key to the scorer only (tinyrsi passes plain keys to steps;
-tinyhumansai/tinyrsi#61). The scorer gives the key to `docker run` by name, so
-it never appears on a logged command line. Embeddings, the reader, the judge
-and the hive still go through the gateway: the cached index was built with
-`text-embedding-3-small`, and queries must be embedded the same way. Remove
-the `env` entries to send everything through the gateway again.
+The swarm, the reader, the judge and CortexDB all call `flash`: GLM 5.3 Flash
+served by the local LLM ladder router (`http://127.0.0.1:6969/v1`) from surplus
+capacity. They still cross the run's spend gateway, so they are metered and
+capped: start the run with the gateway pointed at the ladder,
+
+```sh
+TINYRSI_UPSTREAM=http://127.0.0.1:6969/v1 tinyrsi run loops/lme2-recall
+```
+
+and `rsi.json` does the rest. `keys.openrouter` names `LADDER_API_KEY`, the key
+the gateway sends upstream. `budget.prices.flash` uses provider `"*"`, so the
+gateway leaves out OpenRouter's `provider` routing object, which the ladder
+refuses. `LME2_MODEL=flash` is the scorer's reader, judge and CortexDB model.
+
+Embeddings are the exception. The cached index was built with
+`openai/text-embedding-3-small`, and queries must be embedded the same way,
+but the ladder has no such rung. So `LME2_EMBEDDING_URL` and
+`LME2_EMBEDDING_KEY_ENV` send CortexDB's embeddings straight to OpenRouter.
+The key is the `keys.embeddings` entry, which tinyrsi passes to steps only.
+The scorer gives it to `docker run` by name, so it never appears on a logged
+command line. These calls cost about $0.005 per score and are not metered by
+the gateway.
 
 ## Tuning with `env`
 
 Step commands see only `PATH`, `HOME`, `TMPDIR`, the `RSI_*` variables and
-`rsi.json`'s `env` map. The committed `rsi.json`'s `env` only routes CortexDB's chat calls (see
-above); the measurement uses the frozen defaults. For a local smoke run, add an `env` map with any of:
+`rsi.json`'s `env` map. The committed `rsi.json`'s `env` only selects the model name and the
+embedding route (see above); the measurement uses the frozen defaults. For a local smoke run, add an `env` map with any of:
 
 | Key | Default | Effect |
 | --- | --- | --- |
