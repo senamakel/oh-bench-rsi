@@ -169,14 +169,14 @@
     },
     "conduct": {
       "child_turn_wall": 6,
-      "turn_wall": 60
+      "turn_wall": 40
     }
   },
   "coordinator": {
     "round_width": 4,
     "conduct_policy": {
       "child_turn_wall": 6,
-      "turn_wall": 60
+      "turn_wall": 40
     },
     "broadcast_budget": null,
     "retention": {
