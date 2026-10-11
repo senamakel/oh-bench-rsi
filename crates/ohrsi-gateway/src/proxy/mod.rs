@@ -121,11 +121,17 @@ impl Gateway {
 type Shared = State<Arc<Gateway>>;
 
 async fn chat(State(gw): Shared, headers: HeaderMap, body: Bytes) -> Response {
-    forward(gw, Endpoint::Chat, header_tags(&headers), body).await
+    detached(forward(gw, Endpoint::Chat, header_tags(&headers), body)).await
 }
 
 async fn embeddings(State(gw): Shared, headers: HeaderMap, body: Bytes) -> Response {
-    forward(gw, Endpoint::Embeddings, header_tags(&headers), body).await
+    detached(forward(
+        gw,
+        Endpoint::Embeddings,
+        header_tags(&headers),
+        body,
+    ))
+    .await
 }
 
 async fn tagged_chat(
@@ -134,7 +140,13 @@ async fn tagged_chat(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    forward(gw, Endpoint::Chat, path_tags(&headers, phase, seat), body).await
+    detached(forward(
+        gw,
+        Endpoint::Chat,
+        path_tags(&headers, phase, seat),
+        body,
+    ))
+    .await
 }
 
 async fn tagged_embeddings(
@@ -164,6 +176,18 @@ async fn models(State(gw): Shared) -> Response {
 
 async fn status(State(gw): Shared) -> Response {
     axum::Json(gw.status()).into_response()
+}
+
+/// Runs a forward on its own task and waits for it.
+///
+/// axum drops a handler's future when the client disconnects. A forward
+/// dropped between reserving and settling would leave its reservation in
+/// flight forever, so the upstream call and its settlement run detached and
+/// finish even if nobody is left to read the response.
+async fn detached(call: impl Future<Output = Response> + Send + 'static) -> Response {
+    tokio::spawn(call).await.unwrap_or_else(|error| {
+        error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string())
+    })
 }
 
 fn header_tags(headers: &HeaderMap) -> Tags {

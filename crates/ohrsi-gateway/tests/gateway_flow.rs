@@ -376,13 +376,24 @@ async fn a_client_that_disconnects_mid_call_still_settles() {
         .timeout(std::time::Duration::from_millis(50))
         .build()
         .unwrap();
-    let body = json!({"model": "z-ai/glm-5.3-flash", "messages": [{"role": "user", "content": "slow"}]});
-    let result = client.post(format!("{}/v1/chat/completions", h.base)).json(&body).send().await;
-    assert!(result.is_err(), "the client gives up before the upstream answers");
+    let body =
+        json!({"model": "z-ai/glm-5.3-flash", "messages": [{"role": "user", "content": "slow"}]});
+    let result = client
+        .post(format!("{}/v1/chat/completions", h.base))
+        .json(&body)
+        .send()
+        .await;
+    assert!(
+        result.is_err(),
+        "the client gives up before the upstream answers"
+    );
     for _ in 0..100 {
         let run = h.status().await["run"].clone();
         if run["in_flight_usd"].as_f64().unwrap() < 1e-12 {
-            assert!((run["settled_usd"].as_f64().unwrap() - 0.003).abs() < 1e-12, "{run}");
+            assert!(
+                (run["settled_usd"].as_f64().unwrap() - 0.003).abs() < 1e-12,
+                "{run}"
+            );
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
