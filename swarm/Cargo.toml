@@ -29,6 +29,8 @@ tinyhivemind-hives = { path = "../vendor/tinyrsi/vendor/tinyhivemind/crates/tiny
 tinyhivemind-openhuman = { path = "../vendor/tinyrsi/vendor/tinyhivemind/crates/tinyhivemind-openhuman", features = ["offline"] }
 # The agent harness every seat runs on.
 openhuman-embed = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/crates/openhuman-embed", default-features = false }
+# `TurnHooks::after_turn` names core's usage type.
+openhuman = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/crates/openhuman-core", default-features = false }
 
 [patch."https://github.com/tinyhumansai/openhuman"]
 openhuman-embed = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/crates/openhuman-embed" }
