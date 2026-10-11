@@ -82,7 +82,7 @@ def git(repo: str, *args: str) -> str:
 def main() -> int:
     candidate, incumbent = os.environ["RSI_CANDIDATE"], os.environ["RSI_INCUMBENT"]
     if not QUESTIONS.exists():
-        print(f"leakage: cannot check, {QUESTIONS.relative_to(ROOT)} is missing (run scripts/bootstrap.sh)", file=sys.stderr)
+        print(f"leakage: cannot check, {QUESTIONS.relative_to(ROOT)} is missing (prepare the LongMemEval-V2 data in benchmarks/)", file=sys.stderr)
         return 1
     base = git(incumbent, "rev-parse", "HEAD").strip()
     added = added_text(git(candidate, "diff", f"{base}...HEAD"))
