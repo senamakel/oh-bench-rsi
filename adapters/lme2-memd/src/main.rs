@@ -135,16 +135,19 @@ impl Backlog {
 
 /// Whether enrichment has caught up with `stored` writes.
 ///
-/// CortexDB queues enrichment in waves (256 jobs at a time), so an empty
-/// queue alone does not mean every write was enriched: the next wave may not
-/// be queued yet. Ready means every stored item has been processed *and*
-/// the queue has been empty and unchanged for three consecutive polls.
+/// CortexDB dispatches enrichment in waves: one scan chunk, then nothing new
+/// until that chunk drains. So an empty queue alone does not mean every
+/// write was handled. Every stored event has been handled once the queue has
+/// *dispatched* at least `stored` jobs and none is pending. Events that are
+/// dead-lettered (for example by the per-event call cap) finish their job
+/// without counting as enriched or failed, so `processed` cannot be the
+/// test. Ready also requires the queue to be unchanged for three polls.
 fn enrichment_ready(polls: &[Backlog], stored: u64) -> bool {
     let tail = match polls.len().checked_sub(3) {
         Some(start) => &polls[start..],
         None => return false,
     };
-    tail.iter().all(|b| b.pending == 0 && b.processed >= stored && b.queued == tail[0].queued)
+    tail.iter().all(|b| b.pending == 0 && b.queued >= stored && b.queued == tail[0].queued)
 }
 
 async fn settle(State(d): Shared) -> Response {
@@ -342,6 +345,14 @@ mod daemon_test {
         // The first wave of 512 drained, but 1,737 items were stored.
         let polls = [poll(0, 512, 512), poll(0, 512, 512), poll(0, 512, 512)];
         assert!(!enrichment_ready(&polls, 1737));
+    }
+
+    #[test]
+    fn dead_lettered_events_do_not_block_readiness() {
+        // 1,737 dispatched, all finished; 186 dead-lettered, so only 1,551
+        // count as enriched.
+        let polls = [poll(0, 1737, 1551), poll(0, 1737, 1551), poll(0, 1737, 1551)];
+        assert!(enrichment_ready(&polls, 1737));
     }
 
     #[test]

@@ -6,7 +6,7 @@
 
 Used when an evaluation is detached from a still-enriching CortexDB (so a
 failure downstream cannot discard a paid ingest). Waits until every stored
-event is enriched or dead-lettered and the queue is quiet, stops the
+event has been dispatched for enrichment and none is pending, stops the
 container, and clones its data directory into ``runs/ingest-cache/<key>``
 under the same key ``lme2_eval.py`` computes.
 """
@@ -39,9 +39,10 @@ def main() -> None:
         req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/admin/usage", headers={"Authorization": "Bearer lme2-local"})
         u = json.loads(urllib.request.urlopen(req, timeout=30).read())
         cov, bl = u["enrichment_coverage"], u["enrichment_backlog"]
-        done = cov["events_enriched"] + cov["events_failed"]
         log(f"enriched {cov['events_enriched']} failed {cov['events_failed']} pending {bl['jobs_pending']} queued {bl['jobs_queued_total']}")
-        quiet = quiet + 1 if done >= a.stored and bl["jobs_pending"] == 0 else 0
+        # Every event dispatched and none pending: dead-lettered events finish
+        # their job without counting as enriched or failed.
+        quiet = quiet + 1 if bl["jobs_queued_total"] >= a.stored and bl["jobs_pending"] == 0 else 0
         if quiet < 3:
             time.sleep(20)
     hay = json.loads(pathlib.Path(a.haystack).read_text())
