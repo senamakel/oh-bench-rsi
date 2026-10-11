@@ -1,0 +1,33 @@
+# The OpenHuman memory daemon for LongMemEval-V2.
+#
+# A standalone package, not a member of the root workspace: it is compiled
+# once per RSI candidate against *that candidate's* TinyMemory checkout. The
+# paths below point at the incumbent (`vendor/openhuman/vendor/tinymemory`);
+# `scripts/bench/build-memd.sh` writes a copy of this manifest whose three
+# TinyMemory paths point at a candidate worktree instead.
+[package]
+name = "lme2-memd"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "GPL-3.0-only"
+publish = false
+description = "Serves OpenHuman's TinyMemory lifecycle over loopback HTTP for the LongMemEval-V2 harness"
+
+[workspace]
+
+[[bin]]
+name = "lme2-memd"
+path = "src/main.rs"
+
+[dependencies]
+tinymemory-api = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory-api", features = ["conformance"] }
+tinymemory-tools = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory-tools" }
+tinymemory-integrations = { path = "../../vendor/openhuman/vendor/tinymemory/crates/tinymemory-integrations", features = ["cortex"] }
+# HTTP surface for the Python `Memory` backend inside the harness container.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# CortexDB's admin usage endpoint, polled for the enrichment barrier.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

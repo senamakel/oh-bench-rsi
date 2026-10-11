@@ -1,0 +1,83 @@
+//! Price ceilings and provider pins for the models the gateway allows.
+//!
+//! Every model that may cross the gateway has an entry here. The prices are
+//! *ceilings* in US dollars per token: reservations are computed from them,
+//! and OpenRouter is told never to route to a provider charging more
+//! (`provider.max_price`). A model without an entry is refused.
+
+use std::collections::BTreeMap;
+
+use crate::error::{Error, Result};
+
+/// GLM 5.3 Flash: the swarm, reader, judge and CortexDB enrichment model.
+pub const GLM_FLASH: &str = "z-ai/glm-5.3-flash";
+/// The embedding model CortexDB uses.
+pub const EMBEDDING: &str = "openai/text-embedding-3-small";
+
+/// Price ceilings for one model, and the provider it is pinned to.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Price {
+    /// Dollars per prompt token.
+    pub prompt: f64,
+    /// Dollars per completion token.
+    pub completion: f64,
+    /// The only OpenRouter provider the model may be routed to.
+    pub provider: String,
+}
+
+/// Dollars for `tokens` at `per_token`, saturating at `u32::MAX` tokens.
+///
+/// Counts above four billion tokens never occur for one call; saturating
+/// keeps the conversion exact for every real count.
+#[must_use]
+pub fn usd(tokens: u64, per_token: f64) -> f64 {
+    f64::from(u32::try_from(tokens).unwrap_or(u32::MAX)) * per_token
+}
+
+/// The allowlist: model id to price ceiling.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PriceTable(BTreeMap<String, Price>);
+
+impl PriceTable {
+    /// The table every RSI run uses: GLM 5.3 Flash and the embedding model.
+    #[must_use]
+    pub fn standard() -> Self {
+        let mut table = BTreeMap::new();
+        table.insert(
+            GLM_FLASH.to_owned(),
+            Price {
+                prompt: 0.30e-6,
+                completion: 1.00e-6,
+                provider: "z-ai".to_owned(),
+            },
+        );
+        table.insert(
+            EMBEDDING.to_owned(),
+            Price {
+                prompt: 0.02e-6,
+                completion: 0.0,
+                provider: "openai".to_owned(),
+            },
+        );
+        Self(table)
+    }
+
+    /// The ceiling for `model`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownModel`] if the model is not allowed.
+    pub fn get(&self, model: &str) -> Result<&Price> {
+        self.0
+            .get(model)
+            .ok_or_else(|| Error::UnknownModel(model.to_owned()))
+    }
+
+    /// Every allowed model id, in order.
+    pub fn models(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+}
+
+#[cfg(test)]
+mod test;
