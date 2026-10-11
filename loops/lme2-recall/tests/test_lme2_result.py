@@ -5,6 +5,7 @@ import json
 import pathlib
 import sys
 import unittest
+import unittest.mock
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scorers"))
@@ -115,8 +116,6 @@ class ArgumentsTest(unittest.TestCase):
                 unittest.mock.patch("sys.stderr"), self.assertRaises(SystemExit):
             lme2.parse_args([])
 
-
-import unittest.mock  # noqa: E402
 
 if __name__ == "__main__":
     unittest.main()
