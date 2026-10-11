@@ -57,7 +57,7 @@ fn the_binary_lists_the_committed_campaigns() {
     assert!(
         stdout
             .lines()
-            .any(|line| line.starts_with("memory-recall-pack\t")),
+            .any(|line| line.starts_with("lme2-recall\t")),
         "{stdout}"
     );
 }
