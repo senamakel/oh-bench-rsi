@@ -408,6 +408,7 @@ def main(argv: list[str] | None = None) -> None:
     out.mkdir(parents=True, exist_ok=True)
     log = Log(out / "eval.log")
     subset = json.loads((ROOT / "campaigns/lme2/subset.json").read_text(encoding="utf-8"))
+    model = chat_model(os.environ)
     qpath, hpath, splits = subset_inputs(subset, args.limit, out / "inputs")
 
     log(f"building lme2-memd against {tinymemory}")
@@ -460,10 +461,10 @@ def main(argv: list[str] | None = None) -> None:
             HARNESS_IMAGE, str(VENV_PY), str(ROOT / "adapters/lme2/run_harness.py"), str(OFFICIAL),
             "--domain", subset["domain"], "--questions-path", str(qpath), "--haystack-path", str(hpath),
             "--trajectories-path", str(DATA / "trajectories.jsonl"), "--memory-config-path", str(out / "memory_config.json"),
-            "--output-dir", str(harness_out), "--model", MODEL, "--base-url", f"{gw}/__tag/reader/harness/v1",
+            "--output-dir", str(harness_out), "--model", model, "--base-url", f"{gw}/__tag/reader/harness/v1",
             "--max-completion-tokens", "4096", "--reader-max-concurrent-requests", str(args.concurrency),
             "--reasoning-effort", "low", "--timeout-seconds", "600",
-            "--evaluator-model", MODEL, "--evaluator-base-url", f"{gw}/__tag/judge/harness/v1",
+            "--evaluator-model", model, "--evaluator-base-url", f"{gw}/__tag/judge/harness/v1",
             "--evaluator-reasoning-effort", "low", "--evaluator-max-completion-tokens", "2048",
             "--evaluator-timeout-seconds", "600",
         ]
