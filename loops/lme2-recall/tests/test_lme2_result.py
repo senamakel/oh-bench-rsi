@@ -135,3 +135,42 @@ class SettledOnRestoreTest(unittest.TestCase):
         log = "lme2-memd: enrichment Backlog { pending: 0, queued: 1168, processed: 2213 } stored=0\n"
         self.assertFalse(lme2.drained_on_restore(log))
         self.assertFalse(lme2.drained_on_restore(""))
+
+
+class CortexEnvTest(unittest.TestCase):
+    """CortexDB's model calls go through the spend gateway under the loop's
+    chat model; only embeddings may go straight to a provider, named by
+    ``LME2_EMBEDDING_URL`` and ``LME2_EMBEDDING_KEY_ENV``, since the cached
+    index needs ``text-embedding-3-small`` and the gateway's router may not
+    serve it."""
+
+    GATEWAY = "http://127.0.0.1:9000"
+    TAGGED = "http://host.docker.internal:9000/__tag/ingest/cortex/v1"
+
+    def test_every_call_goes_through_the_gateway_by_default(self) -> None:
+        env, secrets = lme2.cortex_env(self.GATEWAY, model="flash", embedding=None)
+        for name in ("CORTEX_EMBEDDING_URL", "CORTEX_LLM_URL", "CORTEX_ENRICHMENT_URL",
+                     "CORTEX_ANSWER_URL", "CORTEX_VERIFIER_URL"):
+            self.assertEqual(env[name], self.TAGGED, name)
+        for name in ("CORTEX_LLM_MODEL", "CORTEX_ENRICHMENT_MODEL", "CORTEX_ANSWER_MODEL", "CORTEX_VERIFIER_MODEL"):
+            self.assertEqual(env[name], "flash", name)
+        self.assertEqual(env["CORTEX_EMBEDDING_MODEL"], lme2.EMBED)
+        self.assertEqual(secrets, [])
+
+    def test_a_direct_embedding_route_keeps_its_key_off_the_command_line(self) -> None:
+        route = lme2.EmbeddingRoute(url="https://openrouter.ai/api/v1", key_env="OPENROUTER_API_KEY")
+        env, secrets = lme2.cortex_env(self.GATEWAY, model="flash", embedding=route)
+        self.assertEqual(env["CORTEX_EMBEDDING_URL"], "https://openrouter.ai/api/v1")
+        self.assertEqual(env["CORTEX_ENRICHMENT_URL"], self.TAGGED)
+        self.assertEqual(secrets, ["CORTEX_EMBEDDING_API_KEY"])
+        self.assertNotIn("CORTEX_EMBEDDING_API_KEY", env)
+
+    def test_settings_come_from_the_environment(self) -> None:
+        self.assertEqual(lme2.chat_model({}), lme2.MODEL)
+        self.assertEqual(lme2.chat_model({"LME2_MODEL": "flash"}), "flash")
+        self.assertIsNone(lme2.embedding_route({}))
+        self.assertEqual(
+            lme2.embedding_route({"LME2_EMBEDDING_URL": "https://e/v1", "LME2_EMBEDDING_KEY_ENV": "K"}),
+            lme2.EmbeddingRoute("https://e/v1", "K"))
+        with self.assertRaises(ValueError):
+            lme2.embedding_route({"LME2_EMBEDDING_URL": "https://e/v1"})

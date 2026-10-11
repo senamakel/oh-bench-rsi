@@ -22,4 +22,5 @@ if ! git -C "$tinymemory" rev-parse --verify --quiet refs/heads/rsi/main >/dev/n
 fi
 # `check` only needs the key's name to exist; it never reads its value.
 OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-check-only}" \
+LADDER_API_KEY="${LADDER_API_KEY:-check-only}" \
   cargo run -q --manifest-path vendor/tinyrsi/Cargo.toml -p tinyrsi-cli -- check loops/lme2-recall

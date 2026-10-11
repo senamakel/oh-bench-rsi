@@ -59,10 +59,11 @@ jobs:
             vendor/tinyrsi -> target
             adapters/lme2-memd -> ../../target/memd
 
-      # `check` resolves the OpenRouter key's name but never uses its value.
+      # `check` resolves the keys' names but never uses their values.
       - name: Validate the loop folder
         env:
           OPENROUTER_API_KEY: ci-placeholder
+          LADDER_API_KEY: ci-placeholder
         run: cargo run --locked --manifest-path vendor/tinyrsi/Cargo.toml -p tinyrsi-cli -- check loops/lme2-recall
 
       - name: Build the memd adapter against the vendored TinyMemory

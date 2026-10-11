@@ -44,6 +44,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from typing import NamedTuple
 
 # loops/lme2-recall/scorers/lme2.py -> the oh-bench-rsi checkout.
 ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -157,20 +158,71 @@ def ingest_key(tinymemory: pathlib.Path, haystack_ids: list[str], engine: str) -
     return hashlib.sha256(material.encode()).hexdigest()[:24], material
 
 
-def start_cortex(name: str, data_dir: pathlib.Path, gateway: str, log: Log) -> str:
+class EmbeddingRoute(NamedTuple):
+    """A provider CortexDB embeds through directly, instead of the gateway:
+    its OpenAI-compatible ``url`` and ``key_env``, the variable holding its
+    key (tinyrsi passes plain ``keys`` to steps)."""
+
+    url: str
+    key_env: str
+
+
+def chat_model(environ: dict) -> str:
+    """The chat model for the reader, the judge and CortexDB: ``LME2_MODEL``,
+    the name the gateway's upstream knows it by, else ``MODEL``."""
+    return environ.get("LME2_MODEL", "").strip() or MODEL
+
+
+def embedding_route(environ: dict) -> "EmbeddingRoute | None":
+    """The direct embedding route from ``LME2_EMBEDDING_URL`` and
+    ``LME2_EMBEDDING_KEY_ENV``, or ``None`` to embed through the gateway."""
+    url = environ.get("LME2_EMBEDDING_URL", "").strip()
+    if not url:
+        return None
+    key_env = environ.get("LME2_EMBEDDING_KEY_ENV", "").strip()
+    if not key_env:
+        raise ValueError("LME2_EMBEDDING_URL needs LME2_EMBEDDING_KEY_ENV")
+    return EmbeddingRoute(url, key_env)
+
+
+def cortex_env(gateway: str, model: str, embedding: "EmbeddingRoute | None") -> tuple[dict, list[str]]:
+    """CortexDB's environment, and the names of variables whose values are
+    secrets: those are passed to ``docker run`` by name (``-e NAME``) so the
+    value never appears on a logged command line.
+
+    Chat calls always go through the gateway as ``model``. Embeddings do too
+    unless ``embedding`` routes them straight to a provider: the cached index
+    was built with ``EMBED``, and queries must be embedded the same way."""
     inference = f"{docker_gateway(gateway)}/__tag/ingest/cortex/v1"
     env = {
         "CORTEX_API_KEY": "lme2-local", "CORTEX_DEPLOYMENT_PRESET": "dev_local",
-        "CORTEX_EMBEDDING_URL": inference, "CORTEX_EMBEDDING_API_KEY": "dummy", "CORTEX_EMBEDDING_MODEL": EMBED,
-        "CORTEX_EMBEDDING_DIMS": "1536", "OPENAI_API_KEY": "dummy", "CORTEX_LLM_URL": inference,
-        "CORTEX_ENTITY_API_KEY": "dummy", "CORTEX_LLM_MODEL": MODEL, "CORTEX_ENRICHMENT_URL": inference,
-        "CORTEX_ENRICHMENT_API_KEY": "dummy", "CORTEX_ENRICHMENT_MODEL": MODEL, "CORTEX_ENRICHMENT_DELAY_SECONDS": "0",
+        "CORTEX_EMBEDDING_URL": embedding.url if embedding else inference,
+        "CORTEX_EMBEDDING_MODEL": EMBED, "CORTEX_EMBEDDING_DIMS": "1536",
+        "OPENAI_API_KEY": "dummy", "CORTEX_ENTITY_API_KEY": "dummy",
+        "CORTEX_LLM_URL": inference, "CORTEX_LLM_MODEL": model,
+        "CORTEX_ENRICHMENT_URL": inference, "CORTEX_ENRICHMENT_API_KEY": "dummy",
+        "CORTEX_ENRICHMENT_MODEL": model, "CORTEX_ENRICHMENT_DELAY_SECONDS": "0",
         "CORTEX_ANSWER_PROVIDER": "openai", "CORTEX_ANSWER_URL": inference, "CORTEX_ANSWER_API_KEY": "dummy",
-        "CORTEX_ANSWER_MODEL": MODEL, "CORTEX_VERIFIER_URL": inference, "CORTEX_VERIFIER_API_KEY": "dummy",
-        "CORTEX_VERIFIER_MODEL": MODEL, "CORTEX_VERIFIER_MAX_TOKENS": "4096",
+        "CORTEX_ANSWER_MODEL": model, "CORTEX_VERIFIER_URL": inference, "CORTEX_VERIFIER_API_KEY": "dummy",
+        "CORTEX_VERIFIER_MODEL": model, "CORTEX_VERIFIER_MAX_TOKENS": "4096",
         "CORTEX_V1_LAYERS_AUTO": "1", "CORTEX_AUTO_ROUTE": "1", "CORTEX_CONSOLIDATION_MIN_AGE_HOURS": "0",
         **CORTEX_INGEST_ENV,
     }
+    if embedding:
+        return env, ["CORTEX_EMBEDDING_API_KEY"]
+    env["CORTEX_EMBEDDING_API_KEY"] = "dummy"
+    return env, []
+
+
+def start_cortex(name: str, data_dir: pathlib.Path, gateway: str, model: str,
+                 embedding: "EmbeddingRoute | None", log: Log) -> str:
+    env, secrets = cortex_env(gateway, model, embedding)
+    client_env = dict(os.environ)
+    if embedding:
+        key = os.environ.get(embedding.key_env)
+        if not key:
+            raise RuntimeError(f"{embedding.key_env} is not set; add it to rsi.json's keys")
+        client_env.update({var: key for var in secrets})
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
     # CortexDB keeps all of its state (WAL, HNSW, facts, snapshots) under its
     # data root, `/data`. Persist the whole root, so a stopped container's
@@ -179,7 +231,9 @@ def start_cortex(name: str, data_dir: pathlib.Path, gateway: str, log: Log) -> s
     cmd = ["docker", "run", "-d", "--name", name, "-p", "127.0.0.1::3141", "-v", f"{data_dir}:/data"]
     for k, v in env.items():
         cmd += ["-e", f"{k}={v}"]
-    run(cmd + [CORTEX_IMAGE, "3141", "/data"], log, capture_output=True)
+    for k in secrets:
+        cmd += ["-e", k]
+    run(cmd + [CORTEX_IMAGE, "3141", "/data"], log, capture_output=True, env=client_env)
     port = subprocess.check_output(["docker", "port", name, "3141/tcp"], text=True).strip().splitlines()[0].rsplit(":", 1)[1]
     url = f"http://127.0.0.1:{port}"
     for _ in range(180):
@@ -354,6 +408,7 @@ def main(argv: list[str] | None = None) -> None:
     out.mkdir(parents=True, exist_ok=True)
     log = Log(out / "eval.log")
     subset = json.loads((ROOT / "campaigns/lme2/subset.json").read_text(encoding="utf-8"))
+    model = chat_model(os.environ)
     qpath, hpath, splits = subset_inputs(subset, args.limit, out / "inputs")
 
     log(f"building lme2-memd against {tinymemory}")
@@ -378,7 +433,7 @@ def main(argv: list[str] | None = None) -> None:
                 run(["cp", "-cR", cache / "cortex-data", data_dir], log)
             else:
                 data_dir.mkdir(parents=True)
-            env["CORTEX_DB_URL"] = start_cortex(cortex_name, data_dir, args.gateway, log)
+            env["CORTEX_DB_URL"] = start_cortex(cortex_name, data_dir, args.gateway, model, embedding_route(os.environ), log)
             env["CORTEX_API_KEY"] = "lme2-local"
         memd_log = (out / "memd.log").open("w")
         memd_proc = subprocess.Popen([memd, "--engine", args.engine, "--namespace", f"lme2-{subset['domain']}"],
@@ -406,10 +461,10 @@ def main(argv: list[str] | None = None) -> None:
             HARNESS_IMAGE, str(VENV_PY), str(ROOT / "adapters/lme2/run_harness.py"), str(OFFICIAL),
             "--domain", subset["domain"], "--questions-path", str(qpath), "--haystack-path", str(hpath),
             "--trajectories-path", str(DATA / "trajectories.jsonl"), "--memory-config-path", str(out / "memory_config.json"),
-            "--output-dir", str(harness_out), "--model", MODEL, "--base-url", f"{gw}/__tag/reader/harness/v1",
+            "--output-dir", str(harness_out), "--model", model, "--base-url", f"{gw}/__tag/reader/harness/v1",
             "--max-completion-tokens", "4096", "--reader-max-concurrent-requests", str(args.concurrency),
             "--reasoning-effort", "low", "--timeout-seconds", "600",
-            "--evaluator-model", MODEL, "--evaluator-base-url", f"{gw}/__tag/judge/harness/v1",
+            "--evaluator-model", model, "--evaluator-base-url", f"{gw}/__tag/judge/harness/v1",
             "--evaluator-reasoning-effort", "low", "--evaluator-max-completion-tokens", "2048",
             "--evaluator-timeout-seconds", "600",
         ]
@@ -444,7 +499,7 @@ def main(argv: list[str] | None = None) -> None:
             f.write(json.dumps(row) + "\n")
     head = subprocess.run(["git", "-C", str(tinymemory), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = bool(subprocess.run(["git", "-C", str(tinymemory), "status", "--porcelain"], capture_output=True, text=True).stdout.strip())
-    summary.update({"label": args.label, "checkout": str(tinymemory), "ingest_cache": key, "ingest_cache_hit": hit,
+    summary.update({"label": args.label, "model": model, "checkout": str(tinymemory), "ingest_cache": key, "ingest_cache_hit": hit,
                     "tinymemory_head": head, "tinymemory_dirty": dirty, "limit": args.limit})
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     (out / "result.json").write_text(json.dumps(build_result(summary, failures), indent=2) + "\n", encoding="utf-8")
