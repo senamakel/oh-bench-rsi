@@ -257,17 +257,17 @@ fn read_json(path: &Path) -> anyhow::Result<Value> {
     Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?)
 }
 
-fn flush_messages(coordinator: &Coordinator, desk: &str, members: &[String], seen: &mut BTreeSet<u64>, trace: &Trace) {
-    let mut fresh = Vec::new();
-    for member in members {
-        if let Ok(messages) = coordinator.read_hive(member, desk, None, None) {
-            fresh.extend(messages.into_iter().filter(|m| !seen.contains(&m.sequence)));
+fn flush_messages(coordinator: &Coordinator, _desk: &str, _members: &[String], seen: &mut BTreeSet<u64>, trace: &Trace) {
+    // The host-scope transcript holds desk posts *and* seat-to-seat direct
+    // messages, private rows included; agent-scope reads would miss DMs.
+    let after = seen.iter().next_back().copied();
+    let Ok(messages) = coordinator.read_transcript(after) else {
+        return;
+    };
+    for message in messages {
+        if !seen.insert(message.sequence) {
+            continue;
         }
-    }
-    fresh.sort_by_key(|m| m.sequence);
-    fresh.dedup_by_key(|m| m.sequence);
-    for message in fresh {
-        seen.insert(message.sequence);
         let to = match &message.destination {
             Destination::Hive(id) => format!("hive:{id}"),
             Destination::Agent(id) => id.clone(),
