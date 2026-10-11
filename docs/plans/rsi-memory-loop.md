@@ -5,35 +5,45 @@ Spec: [`../specs/rsi-memory-loop.md`](../specs/rsi-memory-loop.md).
 ## Phase 0 — scaffold (done)
 
 - [x] Submodules: `vendor/openhuman`, `vendor/tinyrsi`, `benchmarks`.
-- [x] `ohrsi` crate: campaign schema + validation, workspace checks, `check` / `list`.
-- [x] Draft campaigns `memory-recall-pack`, `memory-temporal-recall`.
-- [x] Docs, ADRs, CI without submodules.
+- [x] Docs, ADRs, CI.
 
-## Phase 1 — benchmark adapter
+## Phase 1 — benchmark adapter (done)
 
-- [ ] Decide the candidate-to-benchmark binding (spec open question 1); record an ADR.
-- [ ] `scripts/bench/memory-metric.sh`: run `benchmarks/memory` for one arm on one
-      seed against a given OpenHuman checkout, print `METRIC memory_accuracy=…`.
-      Test: offline fixture `answers.jsonl` → expected metric.
-- [ ] `ohrsi check` verifies the campaign command exists.
+- [x] `adapters/lme2-memd`: TinyMemory over loopback HTTP, built per candidate.
+- [x] `adapters/lme2`: the official harness's `oh_tinymemory` backend.
+- [x] Frozen subset `campaigns/lme2/subset.json` (75 dev / 150 test, ADR 0006).
+- [x] Ingest cache keyed on the write path; `lme2_snapshot.py` salvages a
+      failed ingest.
 
-## Phase 2 — candidates and gate
+## Phase 2 — hand-written loop (done, retired)
 
-- [ ] `ohrsi` creates/removes OpenHuman worktrees under `runs/`.
-- [ ] Surface guard: diff a candidate against its base, reject frozen/unlisted changes.
-- [ ] Build-and-test gate per campaign.
+- [x] Epoch driver, gate, sign test and brief in `scripts/rsi/`; swarm host in
+      `swarm/`; spend gateway in `crates/ohrsi-gateway`.
+- [x] Baseline run (`run-02`).
 
-## Phase 3 — loop
+## Phase 3 — tinyrsi loop folder (ADR 0007)
 
-- [ ] Depend on `vendor/tinyrsi` (`tinyrsi` crate) and map `Campaign` → `ScriptSubject`.
-- [ ] `ohrsi run <campaign>` with JSONL trace and ledger under `runs/`.
-- [ ] Offline end-to-end test with a mock model and mock benchmark.
+- [x] Bump `vendor/tinyrsi` to the `tinyrsi` binary (tinyrsi#50, #51).
+- [x] `loops/lme2-recall/`: `rsi.json`, `brief.md`, `hive/`,
+      `scorers/lme2.py` (writes `result.json`), `gates/leakage.py`,
+      `gates/green.py`, unit tests in `tests/`.
+- [x] Delete `scripts/rsi/`, `with-gateway.sh`, `swarm/`, `crates/`, the root
+      Cargo workspace and the campaign TOML.
+- [x] CI: unit tests, `tinyrsi check loops/lme2-recall`, memd build.
+- [ ] First `tinyrsi run loops/lme2-recall` within its $5 cap: confirm the
+      scorer under the step contract (Docker mounts of the run store, gateway
+      tags, ingest cache hit) and commit the report under `docs/results/`.
 
 ## Phase 4 — ship
 
-- [ ] `ohrsi export <run>`: incumbent diff + evidence summary for an upstream PR.
-- [ ] First live campaign within its cap; commit the report under `docs/results/`.
+- [ ] Measure the `recall::excerpt` candidate (`patches/tinymemory/`).
+- [ ] Upstream promoted TinyMemory changes from `patches/`, each with its test.
 
 ## Verification
 
-The four contract commands in `AGENTS.md`, plus `scripts/bootstrap.sh` on a fresh clone.
+```sh
+python3 -m unittest discover -s loops/lme2-recall/tests
+OPENROUTER_API_KEY=placeholder cargo run --manifest-path vendor/tinyrsi/Cargo.toml \
+  -p tinyrsi-cli -- check loops/lme2-recall
+cargo build --manifest-path adapters/lme2-memd/Cargo.toml --target-dir target/memd
+```
