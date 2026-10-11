@@ -92,12 +92,66 @@ def test_accuracy(summary_dir: pathlib.Path) -> float:
     return json.loads((summary_dir / "summary.json").read_text())["splits"]["test"]["accuracy"]
 
 
+class Ctx:
+    """Mutable state shared by every candidate considered in a run."""
+
+    def __init__(self, gw, run_dir, trace, incumbent, inc_dir, history):
+        self.gw, self.run_dir, self.trace = gw, run_dir, trace
+        self.incumbent, self.inc_dir, self.history = incumbent, inc_dir, history
+
+
+def consider(ctx: "Ctx", epoch: int, seat: str, checkout: pathlib.Path, branch, epoch_report: dict) -> str | None:
+    """Gate, measure, decide and maybe promote one candidate. Returns "budget" to stop."""
+    trace = ctx.trace
+    worktree = checkout / "vendor/tinymemory"
+    gated = gate.check(ROOT, worktree, ROOT / "target/candidates")
+    cand_head = gated.get("head") or head(worktree)
+    entry = {"seat": seat, "branch": branch, "head": cand_head, "gate": gated["checks"],
+             "commits": gate.git(worktree, "log", "--oneline", "rsi/main..HEAD").strip()}
+    (ctx.run_dir / f"gate-e{epoch}-{seat}.json").write_text(json.dumps(gated, indent=2), encoding="utf-8")
+    trace.emit("ideated", epoch=epoch, proposal_id=f"e{epoch}-{seat}", parent=ctx.incumbent[:12],
+               candidate=cand_head[:12] if gated["changed"] else None,
+               rationale=entry["commits"][:300] or "no commits", hypothesis=f"{seat}: {', '.join(gated['changed'][:4])}")
+    if not gated["passed"]:
+        ctx.history.append(f"epoch {epoch} {seat}: rejected at the gate ({gated['checks']})")
+        trace.emit("scored", epoch=epoch, candidate=cand_head[:12], decision="reject", estimate=0.0, lower=0.0, upper=0.0)
+        epoch_report["candidates"].append(entry)
+        return None
+    if remaining(ctx.gw) < EVAL_COST_FLOOR:
+        entry["skipped"] = "budget"
+        epoch_report["candidates"].append(entry)
+        return "budget"
+    t = time.monotonic()
+    cand_dir = evaluate(ctx.gw, ctx.run_dir, f"e{epoch}-{seat}", checkout)
+    acc = test_accuracy(cand_dir)
+    trace.emit("executed", epoch=epoch, candidate=cand_head[:12], seed=27, metric=acc, ok=True,
+               duration_ms=int((time.monotonic() - t) * 1000))
+    trace.emit("measured", epoch=epoch, candidate=cand_head[:12], mean=acc, failures=0, seeds=1)
+    verdict = decide.decide(test_scores(ctx.inc_dir), test_scores(cand_dir))
+    entry["eval"] = {"test_accuracy": acc, "incumbent_test_accuracy": test_accuracy(ctx.inc_dir),
+                     "dev_accuracy": json.loads((cand_dir / "summary.json").read_text())["splits"]["dev"]["accuracy"], **verdict}
+    trace.emit("scored", epoch=epoch, candidate=cand_head[:12], decision=verdict["decision"],
+               estimate=verdict["estimate"], lower=verdict["lower"], upper=verdict["upper"])
+    ctx.history.append(f"epoch {epoch} {seat}: {entry['commits'][:120]} → {verdict['decision']} "
+                       f"(test {test_accuracy(ctx.inc_dir):.3f} → {acc:.3f}, wins {verdict['wins']}, losses {verdict['losses']})")
+    if verdict["decision"] == "accept":
+        subprocess.run(["git", "-C", str(TINYMEMORY), "merge", "--ff-only", "-q", cand_head], check=True)
+        trace.emit("improved", epoch=epoch, **{"from": ctx.incumbent[:12]}, to=cand_head[:12], metric=acc)
+        ctx.incumbent, ctx.inc_dir = cand_head, cand_dir
+        entry["promoted"] = True
+    epoch_report["candidates"].append(entry)
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--run", required=True)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--hive", default=str(ROOT / "hives/memory-rsi"))
     parser.add_argument("--swarm-wall-secs", type=int, default=3600)
+    parser.add_argument("--candidate", action="append", default=[],
+                        help="name=checkout: a hand-made candidate considered in epoch 0, before the swarm")
+    parser.add_argument("--no-swarm", action="store_true", help="only consider --candidate entries")
     args = parser.parse_args()
     gw = os.environ.get("OHRSI_GATEWAY") or sys.exit("run behind scripts/bench/with-gateway.sh")
     run_dir = ROOT / "runs" / args.run
@@ -116,15 +170,24 @@ def main() -> None:
     trace.emit("measured", epoch=0, candidate=incumbent[:12], mean=test_accuracy(inc_dir), failures=0, seeds=1)
     history: list[str] = []
     stop = "max_epochs"
+    ctx = Ctx(gw, run_dir, trace, incumbent, inc_dir, history)
+    if args.candidate:
+        epoch0 = {"epoch": 0, "candidates": []}
+        for spec in args.candidate:
+            name, _, path = spec.partition("=")
+            stop = consider(ctx, 0, name, pathlib.Path(path).resolve(), None, epoch0) or stop
+        report["epochs"].append(epoch0)
+    if args.no_swarm:
+        args.epochs = 0
 
     for epoch in range(1, args.epochs + 1):
-        trace.emit("epoch_started", epoch=epoch, incumbent=incumbent[:12])
-        trace.emit("observed", epoch=epoch, incumbent=incumbent[:12], incumbent_metric=test_accuracy(inc_dir),
+        trace.emit("epoch_started", epoch=epoch, incumbent=ctx.incumbent[:12])
+        trace.emit("observed", epoch=epoch, incumbent=ctx.incumbent[:12], incumbent_metric=test_accuracy(ctx.inc_dir),
                    history=len(history), rejected=sum("rejected" in h for h in history))
         epoch_dir = run_dir / f"epoch-{epoch}"
         epoch_dir.mkdir(parents=True, exist_ok=True)
         brief_path = epoch_dir / "brief.md"
-        brief_path.write_text(brief.build(inc_dir, epoch, history), encoding="utf-8")
+        brief_path.write_text(brief.build(ctx.inc_dir, epoch, history), encoding="utf-8")
         if remaining(gw) < EVAL_COST_FLOOR + 0.5:
             stop = "budget"
             break
@@ -138,49 +201,13 @@ def main() -> None:
         swarm_result = json.loads(result_path.read_text()) if result_path.exists() else {"candidates": {}}
         epoch_report["swarm"] = {k: swarm_result.get(k) for k in ("reason", "report")}
         for seat, cand in swarm_result["candidates"].items():
-            checkout = pathlib.Path(cand["checkout"])
-            worktree = checkout / "vendor/tinymemory"
-            gated = gate.check(ROOT, worktree, ROOT / "target/candidates")
-            cand_head = gated.get("head") or head(worktree)
-            entry = {"seat": seat, "branch": cand.get("branch"), "head": cand_head, "gate": gated["checks"],
-                     "commits": gate.git(worktree, "log", "--oneline", "rsi/main..HEAD").strip()}
-            (epoch_dir / f"gate-{seat}.json").write_text(json.dumps(gated, indent=2), encoding="utf-8")
-            trace.emit("ideated", epoch=epoch, proposal_id=f"e{epoch}-{seat}", parent=incumbent[:12],
-                       candidate=cand_head[:12] if gated["changed"] else None,
-                       rationale=entry["commits"][:300] or "no commits", hypothesis=f"{seat}: {', '.join(gated['changed'][:4])}")
-            if not gated["passed"]:
-                history.append(f"epoch {epoch} {seat}: rejected at the gate ({gated['checks']})")
-                trace.emit("scored", epoch=epoch, candidate=cand_head[:12], decision="reject", estimate=0.0, lower=0.0, upper=0.0)
-                epoch_report["candidates"].append(entry)
-                continue
-            if remaining(gw) < EVAL_COST_FLOOR:
-                entry["skipped"] = "budget"
-                epoch_report["candidates"].append(entry)
-                stop = "budget"
-                continue
-            t = time.monotonic()
-            cand_dir = evaluate(gw, run_dir, f"e{epoch}-{seat}", checkout)
-            acc = test_accuracy(cand_dir)
-            trace.emit("executed", epoch=epoch, candidate=cand_head[:12], seed=27, metric=acc, ok=True,
-                       duration_ms=int((time.monotonic() - t) * 1000))
-            trace.emit("measured", epoch=epoch, candidate=cand_head[:12], mean=acc, failures=0, seeds=1)
-            verdict = decide.decide(test_scores(inc_dir), test_scores(cand_dir))
-            entry["eval"] = {"test_accuracy": acc, "incumbent_test_accuracy": test_accuracy(inc_dir), **verdict}
-            trace.emit("scored", epoch=epoch, candidate=cand_head[:12], decision=verdict["decision"],
-                       estimate=verdict["estimate"], lower=verdict["lower"], upper=verdict["upper"])
-            history.append(f"epoch {epoch} {seat}: {entry['commits'][:120]} → {verdict['decision']} "
-                           f"(test {test_accuracy(inc_dir):.3f} → {acc:.3f}, wins {verdict['wins']}, losses {verdict['losses']})")
-            if verdict["decision"] == "accept":
-                subprocess.run(["git", "-C", str(TINYMEMORY), "merge", "--ff-only", "-q", cand_head], check=True)
-                trace.emit("improved", epoch=epoch, **{"from": incumbent[:12]}, to=cand_head[:12], metric=acc)
-                incumbent, inc_dir = cand_head, cand_dir
-                entry["promoted"] = True
-            epoch_report["candidates"].append(entry)
-        trace.emit("epoch_finished", epoch=epoch, incumbent=incumbent[:12], incumbent_metric=test_accuracy(inc_dir))
+            stop = consider(ctx, epoch, seat, pathlib.Path(cand["checkout"]), cand.get("branch"), epoch_report) or stop
+        trace.emit("epoch_finished", epoch=epoch, incumbent=ctx.incumbent[:12], incumbent_metric=test_accuracy(ctx.inc_dir))
         report["epochs"].append(epoch_report)
         if stop == "budget":
             break
 
+    incumbent, inc_dir = ctx.incumbent, ctx.inc_dir
     report["incumbent"] = incumbent
     report["incumbent_test_accuracy"] = test_accuracy(inc_dir)
     report["gateway"] = gateway_status(gw)
