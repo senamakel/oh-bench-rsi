@@ -5,3 +5,5 @@
 - Every behaviour change ships with a unit test in the touched crate.
 - Keep the crate's own tests green; do not delete or weaken tests.
 - Commit on your candidate branch only. Never push, merge, or open a PR.
+- Test fixtures use neutral placeholder text; a diff that contains benchmark
+  content is rejected before scoring, even by coincidence.
