@@ -1,0 +1,291 @@
+From 04add1032ece2195126831627774fbad8d58bca5 Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 18:24:35 +0530
+Subject: [PATCH 2/2] feat(recall): excerpt long hits around the query instead
+ of truncating
+
+Long recall hits were shortened to their first characters, which often cut
+away the part that answered the pack's query. They are now excerpted around
+the query terms so the retained lines stay relevant.
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ crates/tinymemory-tools/src/recall/excerpt.rs | 144 ++++++++++++++++++
+ .../src/recall/excerpt_tests.rs               |  69 +++++++++
+ crates/tinymemory-tools/src/recall/gather.rs  |  12 +-
+ crates/tinymemory-tools/src/recall/mod.rs     |   1 +
+ 4 files changed, 219 insertions(+), 7 deletions(-)
+ create mode 100644 crates/tinymemory-tools/src/recall/excerpt.rs
+ create mode 100644 crates/tinymemory-tools/src/recall/excerpt_tests.rs
+
+diff --git a/crates/tinymemory-tools/src/recall/excerpt.rs b/crates/tinymemory-tools/src/recall/excerpt.rs
+new file mode 100644
+index 0000000..35e2831
+--- /dev/null
++++ b/crates/tinymemory-tools/src/recall/excerpt.rs
+@@ -0,0 +1,144 @@
++//! Query-aware excerpts of long hits.
++//!
++//! A pack shows each hit as one bullet of at most a few hundred characters.
++//! Cutting a long hit to its first characters keeps its preamble and drops
++//! whatever else it holds — for a tool-heavy agent turn or a long document,
++//! usually the very line the question is about. When the pack has a query,
++//! [`excerpt`] instead keeps:
++//!
++//! - a short **lead** (the hit's first lines), so the bullet still says what
++//!   the item is;
++//! - the **lines that share the most query terms**, best first, until the
++//!   budget is spent;
++//!
++//! and shows them in their original order, joined by an ellipsis wherever
++//! lines were skipped. Without a query, or when no line shares a term with
++//! it, the result is the plain head cut [`shorten`] gives.
++
++use std::collections::HashSet;
++
++use super::render::{shorten, single_line};
++
++/// Share of the budget reserved for the lead.
++const LEAD_SHARE: usize = 4;
++
++/// Marks lines skipped between kept ones.
++const GAP: &str = " … ";
++
++/// Words too common to say anything about relevance.
++const STOPWORDS: &[&str] = &[
++    "a", "an", "and", "are", "as", "at", "be", "by", "can", "did", "do", "does", "for", "from",
++    "had", "has", "have", "how", "i", "in", "is", "it", "its", "my", "of", "on", "or", "our",
++    "that", "the", "their", "there", "this", "to", "was", "were", "what", "when", "where", "which",
++    "who", "why", "with", "you", "your",
++];
++
++/// `text` as one line of at most `max_chars` characters, chosen for `query`.
++pub(crate) fn excerpt(text: &str, query: Option<&str>, max_chars: usize) -> String {
++    let flat = single_line(text);
++    if flat.chars().count() <= max_chars {
++        return flat;
++    }
++    let terms = query.map(terms).unwrap_or_default();
++    let lines: Vec<String> = text
++        .lines()
++        .map(single_line)
++        .filter(|line| !line.is_empty())
++        .collect();
++    let scores: Vec<usize> = lines
++        .iter()
++        .map(|line| {
++            let words = terms_of(line);
++            terms.iter().filter(|term| words.contains(*term)).count()
++        })
++        .collect();
++    if terms.is_empty() || scores.iter().all(|&score| score == 0) {
++        return shorten(&flat, max_chars);
++    }
++
++    let mut kept = vec![false; lines.len()];
++    let mut used = 0usize;
++    let cost = |line: &str| line.chars().count() + GAP.chars().count();
++    // The lead: whole first lines while they fit in their share.
++    for (index, line) in lines.iter().enumerate() {
++        if used + cost(line) > max_chars / LEAD_SHARE {
++            break;
++        }
++        kept[index] = true;
++        used += cost(line);
++    }
++    // Then the best-matching lines; ties go to the earlier line.
++    let mut ranked: Vec<usize> = (0..lines.len()).filter(|&i| scores[i] > 0).collect();
++    ranked.sort_by(|&a, &b| scores[b].cmp(&scores[a]).then(a.cmp(&b)));
++    for index in ranked {
++        if kept[index] {
++            continue;
++        }
++        let remaining = max_chars.saturating_sub(used);
++        if cost(&lines[index]) <= remaining {
++            kept[index] = true;
++            used += cost(&lines[index]);
++        } else if !kept.iter().any(|&k| k) || used < max_chars / 2 {
++            // A single long matching line: show its head rather than nothing.
++            let room = remaining.saturating_sub(GAP.chars().count());
++            if room > 20 {
++                let shortened = shorten(&lines[index], room);
++                return join_kept(&lines, &kept, Some((index, shortened)));
++            }
++        }
++    }
++    join_kept(&lines, &kept, None)
++}
++
++/// The kept lines in order, with a gap marker wherever lines were skipped.
++fn join_kept(lines: &[String], kept: &[bool], replaced: Option<(usize, String)>) -> String {
++    let mut out = String::new();
++    let mut skipped = false;
++    for (index, line) in lines.iter().enumerate() {
++        let shown = match &replaced {
++            Some((at, text)) if *at == index => Some(text.as_str()),
++            _ if kept[index] => Some(line.as_str()),
++            _ => None,
++        };
++        match shown {
++            Some(text) => {
++                if !out.is_empty() {
++                    out.push_str(if skipped { GAP } else { " " });
++                } else if skipped {
++                    out.push_str(GAP.trim_start());
++                }
++                out.push_str(text);
++                skipped = false;
++            }
++            None => skipped = true,
++        }
++    }
++    if skipped {
++        out.push_str(GAP.trim_end());
++    }
++    out
++}
++
++/// The distinct, lowercased content words of a query.
++fn terms(query: &str) -> Vec<String> {
++    let mut seen = HashSet::new();
++    words(query)
++        .filter(|word| word.chars().count() >= 3 && !STOPWORDS.contains(&word.as_str()))
++        .filter(|word| seen.insert(word.clone()))
++        .collect()
++}
++
++/// The lowercased words of a line, as a set.
++fn terms_of(line: &str) -> HashSet<String> {
++    words(line).collect()
++}
++
++fn words(text: &str) -> impl Iterator<Item = String> + '_ {
++    text.split(|c: char| !c.is_alphanumeric())
++        .filter(|word| !word.is_empty())
++        .map(str::to_lowercase)
++}
++
++#[cfg(test)]
++#[path = "excerpt_tests.rs"]
++mod tests;
+diff --git a/crates/tinymemory-tools/src/recall/excerpt_tests.rs b/crates/tinymemory-tools/src/recall/excerpt_tests.rs
+new file mode 100644
+index 0000000..63ea4e7
+--- /dev/null
++++ b/crates/tinymemory-tools/src/recall/excerpt_tests.rs
+@@ -0,0 +1,69 @@
++//! Query-aware excerpts: what a long hit keeps, and what it falls back to.
++
++use super::*;
++
++fn page(answer: &str) -> String {
++    let filler: String = (0..30).map(|i| format!("menu item {i}\n")).collect();
++    format!("Visited the settings page.\n{filler}{answer}\n{filler}")
++}
++
++#[test]
++fn short_text_is_returned_whole_on_one_line() {
++    assert_eq!(excerpt("one\ntwo", Some("two"), 100), "one two");
++}
++
++#[test]
++fn keeps_the_lead_and_the_matching_line_in_order() {
++    let text = page("Archive retention: 90 days");
++    let out = excerpt(&text, Some("archive retention"), 200);
++    assert!(out.starts_with("Visited the settings page."), "{out}");
++    assert!(out.contains("Archive retention: 90 days"), "{out}");
++    assert!(out.find("Visited").unwrap() < out.find("Archive").unwrap());
++    assert!(out.chars().count() <= 200, "{}", out.chars().count());
++}
++
++#[test]
++fn marks_skipped_lines() {
++    let out = excerpt(&page("Archive retention: 90 days"), Some("archive"), 200);
++    assert!(out.contains(" … Archive retention"), "{out}");
++    assert!(out.ends_with('…'), "{out}");
++}
++
++#[test]
++fn ranks_lines_by_how_many_query_terms_they_share() {
++    let filler: String = (0..30).map(|i| format!("menu item {i}\n")).collect();
++    let text = format!("Lead line.\n{filler}archive policy\n{filler}archive retention policy\n");
++    let out = excerpt(&text, Some("archive retention policy"), 90);
++    assert!(out.contains("archive retention policy"), "{out}");
++}
++
++#[test]
++fn falls_back_to_the_head_without_a_query_or_a_match() {
++    let text = page("Archive retention: 90 days");
++    assert_eq!(excerpt(&text, None, 60), shorten(&single_line(&text), 60));
++    assert_eq!(
++        excerpt(&text, Some("unrelated words"), 60),
++        shorten(&single_line(&text), 60)
++    );
++    assert_eq!(
++        excerpt(&text, Some("is the"), 60),
++        shorten(&single_line(&text), 60)
++    );
++}
++
++#[test]
++fn shortens_a_single_long_matching_line() {
++    let long = format!("archive {}", "x".repeat(500));
++    let text = format!("{long}\n{}", "filler line\n".repeat(20));
++    let out = excerpt(&text, Some("archive"), 120);
++    assert!(out.starts_with("archive"), "{out}");
++    assert!(out.chars().count() <= 120, "{}", out.chars().count());
++}
++
++#[test]
++fn query_terms_ignore_stopwords_short_words_and_repeats() {
++    assert_eq!(
++        terms("What is the Archive retention, archive?"),
++        ["archive", "retention"]
++    );
++}
+diff --git a/crates/tinymemory-tools/src/recall/gather.rs b/crates/tinymemory-tools/src/recall/gather.rs
+index a4149af..6a36c4e 100644
+--- a/crates/tinymemory-tools/src/recall/gather.rs
++++ b/crates/tinymemory-tools/src/recall/gather.rs
+@@ -38,7 +38,8 @@ use tinymemory_api::{
+     MetaFilter, Namespace, Reach, RecallRequest, TimeHint,
+ };
+ 
+-use super::render::{Body, Line, Section, shorten, single_line};
++use super::excerpt::excerpt;
++use super::render::{Body, Line, Section};
+ use super::types::{HolisticRecall, ScopeSection, SectionHits, SectionQuery, SkippedSection};
+ 
+ /// Longest a single bullet may be, in characters, before it is shortened: one
+@@ -561,12 +562,9 @@ pub(super) fn settle(
+     let lines = hits
+         .iter()
+         .map(|hit| {
+-            let text = single_line(&bullet_text(hit));
+-            let text = if text.chars().count() > MAX_LINE_CHARS {
+-                shorten(&text, MAX_LINE_CHARS)
+-            } else {
+-                text
+-            };
++            // A long hit keeps the lines that answer the pack's query, not
++            // just its first characters (see `excerpt`).
++            let text = excerpt(&bullet_text(hit), request.query.as_deref(), MAX_LINE_CHARS);
+             Line {
+                 id: hit.id.clone(),
+                 text,
+diff --git a/crates/tinymemory-tools/src/recall/mod.rs b/crates/tinymemory-tools/src/recall/mod.rs
+index 030640c..5ba176d 100644
+--- a/crates/tinymemory-tools/src/recall/mod.rs
++++ b/crates/tinymemory-tools/src/recall/mod.rs
+@@ -62,6 +62,7 @@
+ //! # Ok::<(), Box<dyn std::error::Error>>(())
+ //! ```
+ 
++mod excerpt;
+ mod gather;
+ pub(crate) mod render;
+ mod types;
+-- 
+2.50.1 (Apple Git-155)
+

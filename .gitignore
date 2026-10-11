@@ -27,3 +27,7 @@ worktrees/*
 # RSI run output: candidate checkouts, ledgers, traces, benchmark captures
 runs/*
 !runs/.gitkeep
+
+# Python bytecode from the bench and RSI scripts
+__pycache__/
+*.pyc

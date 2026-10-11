@@ -1,0 +1,66 @@
+From 6bc045552f9d1935342bfcc42e97de6a24c2a94b Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 18:29:17 +0530
+Subject: [PATCH 5/5] feat(rsi-viz): add swarm simulation module with tests
+
+Introduce a swarm simulation library for the rsi-viz app along with a
+test suite covering its behaviour.
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ apps/rsi-viz/lib/swarm.test.ts | 14 ++++++++++++++
+ apps/rsi-viz/lib/swarm.ts      |  8 ++++++--
+ 2 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/apps/rsi-viz/lib/swarm.test.ts b/apps/rsi-viz/lib/swarm.test.ts
+index 62e3376..5eebe7a 100644
+--- a/apps/rsi-viz/lib/swarm.test.ts
++++ b/apps/rsi-viz/lib/swarm.test.ts
+@@ -81,3 +81,17 @@ describe("swarm fold", () => {
+     expect(s.tools).toHaveLength(TOOL_HISTORY);
+   });
+ });
++
++describe("host naming", () => {
++  it("maps the coordinator's host id onto the graph's host node and drops self edges", () => {
++    const s = applySwarmBatch(
++      initialSwarmState(),
++      [
++        started,
++        line(1, { kind: "agent_message", sequence: 0, from: "hivemind:host", to: "lead", body: "brief", only_for: [] }),
++        line(2, { kind: "agent_message", sequence: 1, from: "lead", to: "hive:x", body: "done", only_for: ["lead", "hivemind:host"] }),
++      ].join("\n"),
++    );
++    expect(s.edges).toEqual({ "host→lead": 1, "lead→host": 1 });
++  });
++});
+diff --git a/apps/rsi-viz/lib/swarm.ts b/apps/rsi-viz/lib/swarm.ts
+index 95445cf..0a737a2 100644
+--- a/apps/rsi-viz/lib/swarm.ts
++++ b/apps/rsi-viz/lib/swarm.ts
+@@ -170,7 +170,9 @@ export function applySwarmLine(state: SwarmState, line: string): SwarmState {
+       return next;
+     }
+     case "agent_message": {
+-      const from = str(event.from, "host");
++      // The coordinator signs host messages `hivemind:host`; the graph's
++      // centre node is plain `host`.
++      const from = str(event.from, "host").replace(/^hivemind:host$/, "host");
+       const to = str(event.to);
+       const message: SwarmMessage = {
+         seq,
+@@ -180,7 +182,9 @@ export function applySwarmLine(state: SwarmState, line: string): SwarmState {
+         body: str(event.body),
+         onlyFor: Array.isArray(event.only_for) ? event.only_for.filter((v): v is string => typeof v === "string") : [],
+       };
+-      const targets = message.onlyFor.length > 0 ? message.onlyFor : [to];
++      const targets = (message.onlyFor.length > 0 ? message.onlyFor : [to])
++        .map((t) => t.replace(/^hivemind:host$/, "host"))
++        .filter((t) => t !== from);
+       const edges = { ...next.edges };
+       for (const target of targets) {
+         const key = `${from}→${target}`;
+-- 
+2.50.1 (Apple Git-155)
+

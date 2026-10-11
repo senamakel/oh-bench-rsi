@@ -28,3 +28,16 @@ fn reports_unusable_lock_paths() {
     assert!(matches!(error, Error::Io { .. }), "{error}");
     let _ = std::fs::remove_file(&file);
 }
+
+#[cfg(unix)]
+#[test]
+fn reports_an_unwritable_lock_directory() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("ohrsi-gw-{}-lock-ro", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let result = LedgerLock::acquire(&dir.join("ledger.json"));
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(matches!(result.unwrap_err(), Error::Io { .. }));
+}

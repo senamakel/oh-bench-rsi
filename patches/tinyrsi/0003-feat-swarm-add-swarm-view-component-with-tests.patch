@@ -1,0 +1,92 @@
+From afce18432d9dc2108afaf324d76cb41478d4997a Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 18:13:19 +0530
+Subject: [PATCH 3/5] feat(swarm): add swarm view component with tests
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ apps/rsi-viz/components/SwarmView.tsx |  9 +++++----
+ apps/rsi-viz/lib/swarm.test.ts        | 18 +++++++++---------
+ 2 files changed, 14 insertions(+), 13 deletions(-)
+
+diff --git a/apps/rsi-viz/components/SwarmView.tsx b/apps/rsi-viz/components/SwarmView.tsx
+index 0ec76ab..047e24d 100644
+--- a/apps/rsi-viz/components/SwarmView.tsx
++++ b/apps/rsi-viz/components/SwarmView.tsx
+@@ -86,7 +86,7 @@ function InteractionGraph({ state }: { state: SwarmState }) {
+         </marker>
+       </defs>
+       {Object.entries(state.edges).map(([key, count]) => {
+-        const [from, to] = key.split("→");
++        const [from = "", to = ""] = key.split("→");
+         const a = pos[from];
+         const b = pos[to];
+         if (!a || !b || from === to) return null;
+@@ -159,9 +159,10 @@ export function SwarmView({ state }: { state: SwarmState }) {
+           <InteractionGraph state={state} />
+         </section>
+         <section className="stack">
+-          {state.order.map((id) => (
+-            <SeatCard key={id} seat={state.seats[id]} spend={spend?.bySeat[id]} />
+-          ))}
++          {state.order.map((id) => {
++            const seat = state.seats[id];
++            return seat ? <SeatCard key={id} seat={seat} spend={spend?.bySeat[id]} /> : null;
++          })}
+         </section>
+       </div>
+ 
+diff --git a/apps/rsi-viz/lib/swarm.test.ts b/apps/rsi-viz/lib/swarm.test.ts
+index 5613925..62e3376 100644
+--- a/apps/rsi-viz/lib/swarm.test.ts
++++ b/apps/rsi-viz/lib/swarm.test.ts
+@@ -18,7 +18,7 @@ describe("swarm fold", () => {
+   it("registers seats in declaration order", () => {
+     const s = applySwarmBatch(initialSwarmState(), started);
+     expect(s.order).toEqual(["lead", "implementer-a"]);
+-    expect(s.seats["implementer-a"].editing).toBe(true);
++    expect(s.seats["implementer-a"]!.editing).toBe(true);
+     expect(s.hive).toBe("memory-rsi");
+   });
+ 
+@@ -33,18 +33,18 @@ describe("swarm fold", () => {
+       ].join("\n"),
+     );
+     expect(s.edges).toEqual({ "host→lead": 1, "lead→implementer-a": 2 });
+-    expect(s.seats.lead.messagesSent).toBe(2);
++    expect(s.seats.lead!.messagesSent).toBe(2);
+     expect(s.messages.map((m) => m.body)).toEqual(["brief", "do x", "and y"]);
+   });
+ 
+   it("tracks the active tool and failures", () => {
+     let s = applySwarmBatch(initialSwarmState(), started);
+     s = applySwarmBatch(s, line(1, { kind: "tool_call", seat: "implementer-a", tool: "shell", phase: "started", detail: "cargo test" }));
+-    expect(s.seats["implementer-a"].activeTool).toBe("shell");
++    expect(s.seats["implementer-a"]!.activeTool).toBe("shell");
+     s = applySwarmBatch(s, line(2, { kind: "tool_call", seat: "implementer-a", tool: "shell", phase: "completed", success: false }));
+-    expect(s.seats["implementer-a"].activeTool).toBeNull();
+-    expect(s.seats["implementer-a"].toolFailures).toBe(1);
+-    expect(s.seats["implementer-a"].toolCalls).toBe(1);
++    expect(s.seats["implementer-a"]!.activeTool).toBeNull();
++    expect(s.seats["implementer-a"]!.toolFailures).toBe(1);
++    expect(s.seats["implementer-a"]!.toolCalls).toBe(1);
+   });
+ 
+   it("accumulates turns and keeps the latest spend", () => {
+@@ -58,9 +58,9 @@ describe("swarm fold", () => {
+         line(4, { kind: "swarm_finished", reason: "idle", completed: 3, failed: 0 }),
+       ].join("\n"),
+     );
+-    expect(s.seats.lead.turns).toBe(2);
+-    expect(s.seats.lead.inputTokens).toBe(150);
+-    expect(s.seats.lead.costUsd).toBeCloseTo(0.012);
++    expect(s.seats.lead!.turns).toBe(2);
++    expect(s.seats.lead!.inputTokens).toBe(150);
++    expect(s.seats.lead!.costUsd).toBeCloseTo(0.012);
+     expect(s.spend?.runLimitUsd).toBe(5);
+     expect(s.spend?.bySeat.lead).toBeCloseTo(0.012);
+     expect(s.finished?.reason).toBe("idle");
+-- 
+2.50.1 (Apple Git-155)
+

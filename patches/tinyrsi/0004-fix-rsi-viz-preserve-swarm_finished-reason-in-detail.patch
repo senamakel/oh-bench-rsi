@@ -1,0 +1,34 @@
+From 4199dc6aa72033aad4fdfa787a08c939c410cec2 Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 18:13:56 +0530
+Subject: [PATCH 4/5] fix(rsi-viz): preserve swarm_finished reason in detail
+ payload
+
+The swarm_finished handler now builds the detail object by filtering out
+kind and reason from the event instead of destructuring, so the reason
+field is no longer accidentally included in detail.
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ apps/rsi-viz/lib/swarm.ts | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/apps/rsi-viz/lib/swarm.ts b/apps/rsi-viz/lib/swarm.ts
+index 675e0c6..95445cf 100644
+--- a/apps/rsi-viz/lib/swarm.ts
++++ b/apps/rsi-viz/lib/swarm.ts
+@@ -238,8 +238,8 @@ export function applySwarmLine(state: SwarmState, line: string): SwarmState {
+       };
+     }
+     case "swarm_finished": {
+-      const { kind: _kind, reason, ...detail } = event;
+-      return { ...next, finished: { reason: str(reason, "unknown"), detail } };
++      const detail = Object.fromEntries(Object.entries(event).filter(([k]) => k !== "kind" && k !== "reason"));
++      return { ...next, finished: { reason: str(event.reason, "unknown"), detail } };
+     }
+     default:
+       return next;
+-- 
+2.50.1 (Apple Git-155)
+

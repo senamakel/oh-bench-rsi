@@ -1,0 +1,59 @@
+From 02924e54eb693898600fc66fe659658d542794f7 Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 18:22:45 +0530
+Subject: [PATCH 1/2] test(recall): cover long hits keeping the answering line
+
+Add a test that stores a long document whose relevant line sits between
+runs of unrelated filler, then asserts holistic recall still surfaces the
+line that answers the query alongside the lead. This guards against
+truncation dropping the matching content.
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ .../tinymemory-tools/src/recall/mod_tests.rs  | 32 +++++++++++++++++++
+ 1 file changed, 32 insertions(+)
+
+diff --git a/crates/tinymemory-tools/src/recall/mod_tests.rs b/crates/tinymemory-tools/src/recall/mod_tests.rs
+index 74ce8ee..915137d 100644
+--- a/crates/tinymemory-tools/src/recall/mod_tests.rs
++++ b/crates/tinymemory-tools/src/recall/mod_tests.rs
+@@ -694,3 +694,35 @@ fn a_section_reading_zero_scopes_is_refused() {
+     let request = HolisticRecall::new(Some("q".into()), vec![section.with_max_scopes(0)]);
+     assert!(request.validate().is_err());
+ }
++
++/// A long item: a short lead, a long run of lines unrelated to any question,
++/// one line that answers the question, then more unrelated lines.
++fn long_page(answer: &str) -> String {
++    let filler: String = (0..40)
++        .map(|i| format!("navigation link number {i}\n"))
++        .collect();
++    format!("Opened the account settings page.\n{filler}{answer}\n{filler}")
++}
++
++#[tokio::test]
++async fn a_long_hit_keeps_the_line_that_answers_the_query() {
++    let engine = ReferenceEngine::new();
++    engine
++        .store(StoreItem::document(
++            long_page("option 'Archive retention: 90 days'"),
++            MemoryMeta::default(),
++        ))
++        .await
++        .unwrap();
++    let request = HolisticRecall::new(
++        Some("what is the archive retention period".into()),
++        vec![ScopeSection::fetch("Docs", docs(), 1)],
++    );
++    let pack = holistic_recall(&engine, &request).await.unwrap();
++    assert!(
++        pack.markdown.contains("Archive retention: 90 days"),
++        "{}",
++        pack.markdown
++    );
++    assert!(pack.markdown.contains("Opened the account settings page."));
++}
+-- 
+2.50.1 (Apple Git-155)
+

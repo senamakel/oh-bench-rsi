@@ -55,3 +55,12 @@ fn reports_unwritable_meters() {
     ));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn reports_an_uncreatable_meter_directory() {
+    let file = std::env::temp_dir().join(format!("ohrsi-gw-{}-meter-file", std::process::id()));
+    std::fs::write(&file, "").unwrap();
+    let error = Meter::open(&file.join("sub/meter.jsonl")).unwrap_err();
+    assert!(matches!(error, Error::Io { .. }), "{error}");
+    let _ = std::fs::remove_file(&file);
+}
