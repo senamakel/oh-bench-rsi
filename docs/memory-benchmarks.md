@@ -9,7 +9,7 @@ failures the first campaigns target. All benchmark code lives in the frozen
 | Suite | Path in `benchmarks/` | What it measures | State |
 |---|---|---|---|
 | Memory audit (issue #27) | `memory/` | 20 pinned questions: 7 LongMemEval-S (one per category incl. abstention) + 13 LoCoMo (dialogue 0). Four arms: no-memory, full-context, reference-memory, `oh-tinymemory-cortex-direct`. Official LME judge prompt and LoCoMo category F1. | Runnable, paid (OpenRouter), ~$2 per full run |
-| LongMemEval-V2 | `longmemeval-v2/` | 451 questions, web + enterprise, multimodal. Official `Memory.insert` / `Memory.query` contract. | Data and harness set up; **no OH adapter yet** |
+| LongMemEval-V2 | `longmemeval-v2/` | 451 questions, web + enterprise, multimodal. Official `Memory.insert` / `Memory.query` contract. | **The RSI target.** OH adapter in `adapters/` (this repo); see [the loop spec](specs/rsi-memory-loop.md) for the measured configuration |
 | Compaction probes | `compaction/` | Truth probes over compacted context. | Offline tooling |
 
 The memory arm calls TinyMemory's `CortexEngine` and `AgentMemory::pre_turn`

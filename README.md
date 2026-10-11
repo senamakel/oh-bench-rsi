@@ -10,21 +10,26 @@ patched checkout over paired seeds, keep the candidate only if it beats the incu
 a positive confidence bound, and repeat within a hard spend cap. Accepted candidates become
 upstream pull requests to OpenHuman (or its vendored TinyMemory), never local forks.
 
-> Status: scaffold. Campaign manifests validate; the benchmark adapter and the loop wiring
-> are the next phases in [`docs/plans/rsi-memory-loop.md`](docs/plans/rsi-memory-loop.md).
+> Status: the loop runs end to end on **LongMemEval-V2** (web subset): a
+> spend-capped gateway, an OpenHuman TinyMemory adapter for the official
+> harness, a gate, a paired decision, and a swarm of GLM 5.3 Flash OpenHuman
+> agents defined in the tinyhivemind hive language
+> ([`hives/memory-rsi`](hives/memory-rsi/README.md)), visualized live in
+> rsi-viz. Results per run are in [`docs/results/`](docs/results/).
 
 ## Layout
 
-```text
-Cargo.toml            # virtual workspace
-crates/ohrsi/         # the RSI driver: campaigns, workspace checks, `ohrsi` CLI
-campaigns/            # one TOML manifest per improvement campaign
-scripts/bootstrap.sh  # initialize the submodules this repo needs
-runs/                 # git-ignored run output (candidates, ledgers, traces)
-vendor/openhuman/     # the code being improved (submodule)
-vendor/tinyrsi/       # the improvement loop library (submodule)
-benchmarks/           # openhuman-benchmarks — frozen measurement (submodule)
-docs/                 # specs, plans, ADRs, benchmark notes
+See the project structure in [`AGENTS.md`](AGENTS.md#project-structure): the
+`ohrsi` campaign crate and the `ohrsi-gateway` spend gateway under `crates/`,
+the `swarm/` host, the `hives/memory-rsi` package, the LongMemEval-V2 adapter
+under `adapters/`, and the run driver under `scripts/rsi/`.
+
+## One RSI run
+
+```sh
+cargo build --manifest-path swarm/Cargo.toml --target-dir target/swarm
+scripts/bench/with-gateway.sh run-02 5 -- python3 scripts/rsi/epoch.py --run run-02
+# watch it: cd vendor/tinyrsi/apps/rsi-viz && RSI_RUN_ROOT=../../../../runs npm run dev
 ```
 
 ## Quick start
