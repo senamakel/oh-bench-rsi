@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use openhuman_embed::agent_progress::AgentProgress;
 use serde_json::json;
-use tinyhivemind_openhuman::{TurnDisposition, TurnHooks, TurnProgressSink, TurnScope};
+use tinyhivemind_hives::TurnDisposition;
+use tinyhivemind_openhuman::{TurnHooks, TurnProgressSink, TurnScope};
 
 use crate::trace::{Trace, clip};
 

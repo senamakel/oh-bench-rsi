@@ -1885,6 +1885,7 @@ name = "ohrsi-swarm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "openhuman",
  "openhuman-embed",
  "serde",
  "serde_json",
