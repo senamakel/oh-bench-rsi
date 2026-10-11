@@ -107,7 +107,7 @@ Run every command from the repository root. CI runs these:
 
 ```sh
 python3 -m unittest discover -s loops/lme2-recall/tests
-OPENROUTER_API_KEY=placeholder cargo run --locked --manifest-path vendor/tinyrsi/Cargo.toml \
+OPENROUTER_API_KEY=placeholder LADDER_API_KEY=placeholder cargo run --locked --manifest-path vendor/tinyrsi/Cargo.toml \
   -p tinyrsi-cli -- check loops/lme2-recall
 cargo build --locked --manifest-path adapters/lme2-memd/Cargo.toml --target-dir target/memd
 ```

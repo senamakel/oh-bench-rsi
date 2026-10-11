@@ -9,7 +9,7 @@ LongMemEval-V2 web subset. This folder is a
 cargo install --path vendor/tinyrsi/crates/tinyrsi-cli
 scripts/bootstrap.sh                 # submodules, TinyMemory's local rsi/main
 tinyrsi check loops/lme2-recall      # prints `ok: lme2-recall ...`
-tinyrsi run   loops/lme2-recall      # paid: needs OPENROUTER_API_KEY and Docker
+tinyrsi run   loops/lme2-recall      # paid: needs OPENROUTER_API_KEY, LADDER_API_KEY and Docker
 ```
 
 `tinyrsi run` serves its UI on `http://127.0.0.1:8787` while it works and

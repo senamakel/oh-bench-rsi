@@ -12,7 +12,7 @@ the memd adapter), initialize the submodules, then run the checks CI runs:
 ```sh
 scripts/bootstrap.sh
 python3 -m unittest discover -s loops/lme2-recall/tests
-OPENROUTER_API_KEY=placeholder cargo run --manifest-path vendor/tinyrsi/Cargo.toml \
+OPENROUTER_API_KEY=placeholder LADDER_API_KEY=placeholder cargo run --manifest-path vendor/tinyrsi/Cargo.toml \
   -p tinyrsi-cli -- check loops/lme2-recall
 cargo build --manifest-path adapters/lme2-memd/Cargo.toml --target-dir target/memd
 ```
