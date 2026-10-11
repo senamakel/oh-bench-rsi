@@ -47,6 +47,9 @@ jobs:
           git submodule update --init vendor/tinyrsi vendor/openhuman
           git -C vendor/tinyrsi submodule update --init --recursive --depth 1
           git -C vendor/openhuman submodule update --init --recursive --depth 1
+          # `tinyrsi check` verifies the subject branch exists; create the
+          # local incumbent branch as scripts/bootstrap.sh does.
+          git -C vendor/openhuman/vendor/tinymemory branch rsi/main HEAD
 
       - uses: dtolnay/rust-toolchain@stable
 
