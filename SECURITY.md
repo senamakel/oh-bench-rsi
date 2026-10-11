@@ -41,10 +41,10 @@ Generally out of scope:
 
 ## Practices
 
-- `unsafe` code is forbidden crate-wide by the lint configuration in
-  `Cargo.toml`. Relaxing that is a deliberate, reviewed change.
-- CI runs `cargo-deny` against advisories, licenses, bans, and sources on every
-  push and pull request.
-- Dependabot proposes weekly Cargo and GitHub Actions updates.
+- The only Rust package owned here is `adapters/lme2-memd`; it has no
+  `unsafe` code, and adding any is a deliberate, reviewed change.
+- Loop scripts use the Python standard library only.
+- Dependabot proposes weekly Cargo (`adapters/lme2-memd`) and GitHub Actions
+  updates.
 - Secrets never enter the repository. `.env` is git-ignored, and
   `.env.example` documents variables with placeholder values only.

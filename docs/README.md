@@ -10,10 +10,11 @@ where it cannot drift.
 ```text
 docs/
 ├── README.md      # this index
-├── memory-benchmarks.md  # suites, baselines, failures → campaigns
+├── memory-benchmarks.md  # suites, baselines, known failures
 ├── specs/         # behavior and architecture specifications
 ├── plans/         # implementation plans derived from approved specs
-└── adr/           # architecture decision records, numbered and immutable
+├── adr/           # architecture decision records, numbered and immutable
+└── results/       # one report per paid run
 ```
 
 - **[`specs/`](specs/README.md)** — one file per feature, module, or subsystem,
@@ -26,11 +27,15 @@ docs/
   as the template. An accepted ADR is not edited; it is superseded by a later
   one.
 
-Complex modules also carry a module-level `README.md` inside `src/<module>/`
-covering their design, public surface, and important constraints.
+The loop itself is documented next to it, in
+[`../loops/lme2-recall/README.md`](../loops/lme2-recall/README.md); the
+contract it runs under is tinyrsi's
+[`rsi-cli` spec](../vendor/tinyrsi/docs/specs/rsi-cli.md).
 
 Start with [`memory-benchmarks.md`](memory-benchmarks.md), then the
-[RSI loop spec](specs/rsi-memory-loop.md) and its [plan](plans/rsi-memory-loop.md).
+[RSI loop spec](specs/rsi-memory-loop.md), its [plan](plans/rsi-memory-loop.md)
+and [ADR 0007](adr/0007-run-the-loop-as-a-tinyrsi-loop-folder.md), which moved the
+loop onto the `tinyrsi` binary.
 
 ## Conventions
 

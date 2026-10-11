@@ -14,10 +14,10 @@
 
 Commands actually run, with their outcome:
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --all-targets --all-features -- -D warnings`
-- [ ] `cargo build --all-targets --all-features`
-- [ ] `cargo test --all-features`
+- [ ] `python3 -m unittest discover -s loops/lme2-recall/tests`
+- [ ] `OPENROUTER_API_KEY=placeholder cargo run --manifest-path vendor/tinyrsi/Cargo.toml -p tinyrsi-cli -- check loops/lme2-recall`
+- [ ] `cargo build --manifest-path adapters/lme2-memd/Cargo.toml --target-dir target/memd` (when the adapter changes)
+- [ ] No paid run, or its spend and report under `docs/results/`
 
 ## Tests
 
@@ -30,5 +30,5 @@ Commands actually run, with their outcome:
 ## Checklist
 
 - [ ] The change is focused on one logical change
-- [ ] No new `#[allow(...)]`, `#[ignore]`, or relaxed lints
+- [ ] No new `#[allow(...)]`, skipped tests, relaxed lints, or widened loop surface
 - [ ] No secrets, tokens, or `.env` contents in the diff or the description

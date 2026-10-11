@@ -1,8 +1,11 @@
 # Run reports
 
 One file per run of the $50 campaign (10 runs, $5 cap each). Ledger values
-come from `runs/<run>/budget.json` and `runs/ledger-total.json`; "charged"
-includes reservations kept because a call's cost was unknown.
+for run-00 to run-02 come from `runs/<run>/budget.json` and
+`runs/ledger-total.json`; later runs are `tinyrsi run loops/lme2-recall` runs,
+whose ledger is `~/.tinyrsi/runs/lme2-recall/<run-id>/run.json` and
+`~/.tinyrsi/spend.json` (ADR 0007). "Charged" includes reservations kept
+because a call's cost was unknown.
 
 | Run | Purpose | Charged | Outcome |
 | --- | --- | ---: | --- |
