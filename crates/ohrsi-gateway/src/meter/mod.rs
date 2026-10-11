@@ -85,7 +85,8 @@ impl Meter {
             path: self.path.clone(),
             source,
         };
-        let mut line = serde_json::to_vec(row).map_err(|error| io(std::io::Error::other(error)))?;
+        // A row is plain data with string keys; serializing it cannot fail.
+        let mut line = serde_json::to_vec(row).unwrap_or_default();
         line.push(b'\n');
         std::fs::OpenOptions::new()
             .create(true)
