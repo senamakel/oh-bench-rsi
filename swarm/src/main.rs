@@ -26,12 +26,27 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
-use openhuman_embed::{Access, AgentSpec, Provider, Runtime, Workspace};
+use openhuman_embed::{
+    Access, AgentDefinitionSpec, AgentSpec, GroupMode, Provider, Runtime, ToolGroups, ToolScopeSpec, Workspace,
+};
 use serde_json::{Value, json};
 use tinyhivemind_hives::{Coordinator, CoordinatorOptions, Destination, HiveInfo, SendMessage, SqliteStorage};
 use tinyhivemind_openhuman::OpenHumanHost;
 
 use crate::trace::{Trace, clip};
+
+/// The permanent tools `tinyhivemind-openhuman` attaches to every seat.
+const HIVEMIND_TOOLS: &[&str] = &[
+    "hivemind_ask",
+    "hivemind_broadcast",
+    "hivemind_complete",
+    "hivemind_list_agents",
+    "hivemind_list_hives",
+    "hivemind_post",
+    "hivemind_read",
+    "hivemind_send_agent",
+    "hivemind_send_hive",
+];
 
 struct Options {
     hive: PathBuf,
@@ -103,7 +118,9 @@ fn system_prompt(hive_dir: &Path, seat: &tinyhivemind_lang::LoweredSeat, role: &
     text.push_str(
         "\n## Working in the hive\n\nYou are one seat of a hive. Use the native hivemind tools to talk to other seats \
          (hivemind_send_agent to message one seat, hivemind_read to read the desk) and hivemind_complete to finish an \
-         episode you were assigned. A prose claim of completion is not enough: call the tool.\n",
+         episode you were assigned. A prose claim of completion is not enough: call the tool.\n\n\
+         Turns are asynchronous. After you send a message, END YOUR TURN with a one-line reply and no further \
+         tool calls; you are woken automatically when someone replies. Never wait, sleep or poll for replies.\n",
     );
     Ok(text)
 }
@@ -147,6 +164,9 @@ async fn run(options: Options) -> anyhow::Result<()> {
         .backend_url(backend.uri())
         .provider(Provider::openai_compatible(format!("{gateway}/__tag/swarm/runtime/v1"), "ohrsi-gateway").model("z-ai/glm-5.3-flash"))
         .access(Access::readonly())
+        // Seats are coding agents: put the coding pack's schemas on the wire
+        // instead of behind `use_skill`.
+        .tool_groups(ToolGroups::packed().with("coding", GroupMode::Advertised))
         .build()
         .await?;
 
@@ -171,8 +191,23 @@ async fn run(options: Options) -> anyhow::Result<()> {
         };
         let prompt = system_prompt(&options.hive, seat, &role, &lowered.context, &action_dir)?;
         let access = if editing { Access::full() } else { Access::readonly() };
+        // The package's `tools.allow` is the seat's whole belt (plus the
+        // hivemind tools the adapter attaches); `tools.deny` is removed even
+        // if a later belt change would add it.
+        let mut definition = AgentDefinitionSpec::new().system_prompt(prompt);
+        if !seat.tools.allow.is_empty() {
+            let mut allow = seat.tools.allow.clone();
+            allow.extend(HIVEMIND_TOOLS.iter().map(|t| (*t).to_owned()));
+            definition = definition.tools(ToolScopeSpec::Named(allow));
+        }
+        if !seat.tools.deny.is_empty() {
+            definition = definition.disallow_tools(seat.tools.deny.clone());
+        }
+        if let Some(n) = seat.config["max_iterations"].as_u64() {
+            definition = definition.max_iterations(usize::try_from(n).unwrap_or(usize::MAX));
+        }
         let spec = AgentSpec::new(seat.id.clone())
-            .system_prompt(prompt)
+            .definition(definition)
             .provider(Provider::openai_compatible(format!("{gateway}/__tag/swarm/{}/v1", seat.id), "ohrsi-gateway").model(model.clone()))
             .access(access)
             .action_dir(action_dir.clone());

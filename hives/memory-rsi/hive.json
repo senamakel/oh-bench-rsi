@@ -39,8 +39,22 @@
       },
       "model": "z-ai/glm-5.3-flash",
       "tools": {
-        "allow": [],
-        "deny": []
+        "allow": [
+          "file_read",
+          "grep",
+          "glob",
+          "list",
+          "shell",
+          "read_diff"
+        ],
+        "deny": [
+          "wait",
+          "wait_loop",
+          "spawn_subagent",
+          "spawn_async_subagent",
+          "spawn_parallel_agents",
+          "web_fetch"
+        ]
       },
       "mcp": [],
       "skills": []
@@ -58,8 +72,27 @@
       },
       "model": "z-ai/glm-5.3-flash",
       "tools": {
-        "allow": [],
-        "deny": []
+        "allow": [
+          "file_read",
+          "grep",
+          "glob",
+          "list",
+          "shell",
+          "read_diff",
+          "file_write",
+          "edit",
+          "apply_patch",
+          "git_operations",
+          "run_tests"
+        ],
+        "deny": [
+          "wait",
+          "wait_loop",
+          "spawn_subagent",
+          "spawn_async_subagent",
+          "spawn_parallel_agents",
+          "web_fetch"
+        ]
       },
       "mcp": [],
       "skills": []
