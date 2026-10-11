@@ -1,0 +1,60 @@
+# The memory-rsi swarm host.
+#
+# Standalone (not a root-workspace member): it links OpenHuman through
+# tinyhivemind's pinned checkout, which is large and needs every nested
+# submodule, so the root workspace and CI stay buildable without it. The
+# OpenHuman the swarm *edits* is a separate TinyMemory worktree; the
+# OpenHuman the swarm *runs on* is tinyhivemind's pin below.
+[package]
+name = "ohrsi-swarm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "GPL-3.0-only"
+publish = false
+description = "Runs the memory-rsi hive: OpenHuman agents on a tinyhivemind coordinator"
+
+[workspace]
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs", "process", "signal"] }
+# The hive language: parse, validate and lower the package in hives/.
+tinyhivemind-lang = { path = "../vendor/tinyrsi/vendor/tinyhivemind/crates/tinyhivemind-lang" }
+# Durable cross-hive coordinator with SQLite storage for the run's hive.db.
+tinyhivemind-hives = { path = "../vendor/tinyrsi/vendor/tinyhivemind/crates/tinyhivemind-hives" }
+# Supplied OpenHuman agents with the permanent hivemind tools attached.
+tinyhivemind-openhuman = { path = "../vendor/tinyrsi/vendor/tinyhivemind/crates/tinyhivemind-openhuman", features = ["offline"] }
+# The agent harness every seat runs on.
+openhuman-embed = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/crates/openhuman-embed", default-features = false }
+
+[patch."https://github.com/tinyhumansai/openhuman"]
+openhuman-embed = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/crates/openhuman-embed" }
+openhuman = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/crates/openhuman-core" }
+
+[patch."https://github.com/tinyhumansai/tinytools"]
+tinytools = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinytools/crates/tinytools" }
+tinytools-agent = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinytools/crates/tinytools-agent" }
+
+[patch."https://github.com/tinyhumansai/tinymemory"]
+tinymemory-api = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinymemory/crates/tinymemory-api" }
+tinymemory-tools = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinymemory/crates/tinymemory-tools" }
+tinymemory-integrations = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinymemory/crates/tinymemory-integrations" }
+
+[patch."https://github.com/tinyhumansai/tinyinference"]
+tinyinference-core = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-core" }
+tinyinference-embeddings = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-embeddings" }
+tinyinference-llm = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-llm" }
+tinyinference-local = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-local" }
+tinyinference-providers = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-providers" }
+tinyinference-voice = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-voice" }
+
+[patch.crates-io]
+tinyinference-core = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-core" }
+tinyinference-embeddings = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-embeddings" }
+tinyinference-llm = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-llm" }
+tinyinference-local = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-local" }
+tinyinference-providers = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-providers" }
+tinyinference-voice = { path = "../vendor/tinyrsi/vendor/tinyhivemind/vendor/openhuman/vendor/tinyagents/vendor/tinyinference/crates/tinyinference-voice" }
