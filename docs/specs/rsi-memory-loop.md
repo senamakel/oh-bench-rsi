@@ -1,71 +1,72 @@
 # RSI memory loop
 
-- **Status:** Draft
+- **Status:** Accepted (implemented; live runs in progress)
 - **Owner:** oh-bench-rsi maintainers
 
 ## Problem
 
-OpenHuman's memory arm trails full context on the pinned memory audit
-(see [`../memory-benchmarks.md`](../memory-benchmarks.md)). The known failures
-are in recall gathering, pack rendering and temporal ranking — code with many
-plausible tweaks and a slow, noisy, paid measurement. A disciplined automated
-loop can search that space faster than hand iteration, provided it cannot cheat.
+OpenHuman's memory has never been measured on LongMemEval-V2, and its known
+recall weaknesses (evidence lost in pack trimming, long items crowding out
+others, temporal ordering) are many small, interacting design choices — a
+search space suited to an automated, disciplined improvement loop, provided
+the loop cannot win by changing the measurement.
 
-## Goals
+## Behaviour
 
-- Run tinyrsi's improvement loop against OpenHuman memory code, one campaign at
-  a time, with the benchmark as the only judge.
-- Accept a candidate only on paired-seed evidence with a positive lower bound.
-- Produce, for every accepted candidate, a patch that applies to upstream
-  OpenHuman/TinyMemory with its tests green.
-- Keep every run's ledger, trace and per-seed metrics under `runs/<campaign>/<run-id>/`.
+One **run** is capped at $5 through the spend gateway; the campaign at $50.
+Each run executes `scripts/rsi/epoch.py`:
 
-## Non-goals
+1. **Measure the incumbent** (local `rsi/main` of the vendored TinyMemory)
+   once per commit; the summary is reused while the commit is unchanged.
+2. **Brief**: dev-split accuracy by question type and a sample of failed dev
+   questions with the model's answer and the recall pack it saw. No gold
+   answers, no test-split detail.
+3. **Swarm** (`swarm/`): the `hives/memory-rsi` package, written in the
+   tinyhivemind hive language, runs as OpenHuman agents on GLM 5.3 Flash on
+   a tinyhivemind coordinator. Editing seats work in their own TinyMemory
+   worktree on `rsi/cand-<run>-e<n>-<seat>`, compile and test continuously,
+   and commit.
+4. **Gate** (`scripts/rsi/gate.py`), before any evaluation spend:
+   surface (only `tinymemory-tools`/`tinymemory-integrations`), leakage
+   (no subset question windows, gold answer phrases or site canaries in
+   added lines), tests changed, and `cargo test` green.
+5. **Measure the candidate** on the same 225 questions
+   (`scripts/bench/lme2_eval.py`).
+6. **Decide** (`scripts/rsi/decide.py`) on the 150 test questions only:
+   paired per-question scores, exact one-sided sign test at α = 0.10.
+7. **Promote** an accepted candidate by fast-forwarding the *local*
+   `rsi/main`. Nothing is pushed, merged upstream or opened as a PR.
 
-- Changing benchmarks, data, judges or scoring.
-- Automatic merging upstream: a human reviews every PR.
-- Desktop end-to-end memory evaluation (a later suite).
+Between runs Claude reviews the traces, ledgers and gate results and
+improves the RSI machinery, the hive package, OpenHuman/TinyMemory, and the
+bench wiring (`docs/results/` records each run).
 
-## Proposed behavior
+## Measurement configuration (non-official)
 
-1. **Campaign** — `campaigns/<name>.toml`, format in [`campaigns.md`](campaigns.md).
-2. **Candidate checkout** — each candidate is a git worktree of
-   `vendor/openhuman` (with its nested TinyMemory) under
-   `runs/<campaign>/<run-id>/candidates/<id>/`. Proposals replace whole files on
-   the editable surface only.
-3. **Gate** — before any paid evaluation, the candidate must build and pass the
-   affected crates' tests (`cargo test -p tinymemory-tools`, plus
-   `openhuman-core` memory tests when OH core is on the surface).
-4. **Measure** — the campaign command runs the frozen suite against the
-   candidate checkout once per seed, with `TINYRSI_SEED` set, and prints
-   `METRIC <name>=<value>`.
-5. **Decide** — tinyrsi's paired comparison against the incumbent; promote when
-   the lower bound of the improvement exceeds `0` (or the configured margin).
-6. **Stop** — on target, `max_epochs`, patience, or `usd_cap`.
-7. **Export** — `ohrsi export <run>` writes the incumbent's diff against the
-   pinned base, ready for an upstream PR.
+| Item | Value |
+| --- | --- |
+| Dataset | LongMemEval-V2 `f152293e…`, harness `2cc8c540…`, unmodified |
+| Subset | web, small tier, text-only questions; 75 dev / 150 test, seed 27 |
+| Memory | OpenHuman TinyMemory `AgentMemory::recall`, OpenHuman's default recall policy (1,200-token pack) |
+| Engine | CortexDB v0.10.4, local Docker, enrichment on, 16-way, one scan wave |
+| Ingest | one assistant turn per trajectory state: task, URL, thought, action, novel page lines (≤ 6,000 chars) |
+| Reader / judge | `z-ai/glm-5.3-flash`, reasoning low, via the gateway |
+
+This is not the paper's configuration (Qwen3.5-9B reader, GPT-5.2 judge,
+images) and its scores are not comparable to the leaderboard.
 
 ## Invariants
 
-- No path outside `surface.editable` differs between a candidate and its base.
-- `benchmarks/` is byte-identical before and after a run.
-- The proposer never sees gold answers, judge rationales, or question metadata
-  beyond the per-seed aggregate metric and stderr tails.
-- Total charged spend never exceeds `usd_cap`.
+- Only the gateway holds the provider key; every model call is metered and
+  counted against both caps; the caps cannot be raised for an existing ledger.
+- `benchmarks/` and the official harness are never edited.
+- An ingest snapshot is reused only for an identical haystack, engine image,
+  ingest configuration and write path (TinyMemory api/integrations sources,
+  the adapter's converter).
+- The swarm never sees gold answers or the test split.
 
 ## Acceptance criteria
 
-- One campaign runs end to end offline against a mock model and mock benchmark.
-- One live campaign produces a ledger with at least one decided candidate, its
-  spend under cap, and an exportable diff.
-- A tampered candidate (touches a frozen path) is rejected before evaluation.
-
-## Open questions
-
-- How to point `benchmarks/memory`'s Cargo path dependencies at a candidate
-  checkout without editing the submodule (copied manifest in this repo vs.
-  an upstream `OPENHUMAN_DIR`-style override).
-- Seed semantics: the audit pins seed 27 for task selection; per-seed variance
-  probably has to come from answer sampling or task resampling instead.
-- Whether a held-out question set is needed to guard against overfitting the
-  20-question subset (likely yes before claiming a gain).
+- Baseline and at least one candidate measured end to end within the caps.
+- Every promotion carries a positive paired decision on the test split.
+- Swarm runs are visible in `apps/rsi-viz` (Swarm view) live.
