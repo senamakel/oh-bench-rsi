@@ -266,7 +266,9 @@ def metric_name(text: str) -> str:
 
 def build_result(summary: dict, failures: list[dict]) -> dict:
     """tinyrsi's ``result.json``: dev accuracy as the score, per-item 0/1
-    scores for both splits, a sample of dev failures, and dev/test metrics."""
+    scores for both splits, a sample of dev failures, dev metrics shown to the
+    hive, and the held-out test accuracy in ``private`` so it never reaches
+    the brief."""
     dev, test = summary["splits"]["dev"], summary["splits"]["test"]
     if dev["accuracy"] is None:
         raise RuntimeError("no dev questions were scored")
@@ -280,8 +282,9 @@ def build_result(summary: dict, failures: list[dict]) -> dict:
         if len(shown) >= MAX_FAILURES:
             break
     metrics = {"dev_accuracy": dev["accuracy"]}
+    private = {}
     if test["accuracy"] is not None:
-        metrics["test_accuracy"] = test["accuracy"]
+        private["test_accuracy"] = test["accuracy"]
     if dev["pack_tokens_mean"] is not None:
         metrics["dev_pack_tokens_mean"] = dev["pack_tokens_mean"]
     for kind, row in dev["by_type"].items():
@@ -292,6 +295,7 @@ def build_result(summary: dict, failures: list[dict]) -> dict:
                    for split in ("dev", "test")},
         "failures": shown,
         "metrics": metrics,
+        "private": private,
     }
 
 
