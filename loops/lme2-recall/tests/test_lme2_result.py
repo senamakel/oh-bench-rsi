@@ -33,10 +33,11 @@ class BuildResultTest(unittest.TestCase):
         self.assertEqual(self.result["splits"]["dev"]["items"], {"d1": 0.0, "d2": 1.0, "d3": 0.0})
         self.assertEqual(self.result["splits"]["test"]["items"], {"t1": 1.0, "t2": 0.0})
 
-    def test_metrics_report_dev_test_pack_and_per_type(self) -> None:
+    def test_metrics_report_dev_pack_and_per_type_and_keep_test_private(self) -> None:
         metrics = self.result["metrics"]
         self.assertAlmostEqual(metrics["dev_accuracy"], 1 / 3)
-        self.assertAlmostEqual(metrics["test_accuracy"], 0.5)
+        self.assertNotIn("test_accuracy", metrics)
+        self.assertAlmostEqual(self.result["private"]["test_accuracy"], 0.5)
         self.assertAlmostEqual(metrics["dev_pack_tokens_mean"], 200 / 3)
         self.assertAlmostEqual(metrics["dev_accuracy_temporal"], 0.5)
         self.assertAlmostEqual(metrics["dev_accuracy_single_hop"], 0.0)
@@ -55,7 +56,7 @@ class BuildResultTest(unittest.TestCase):
 
     def test_result_is_json_with_a_finite_score(self) -> None:
         decoded = json.loads(json.dumps(self.result))
-        self.assertEqual(set(decoded), {"score", "splits", "failures", "metrics"})
+        self.assertEqual(set(decoded), {"score", "splits", "failures", "metrics", "private"})
 
     def test_failures_are_capped_per_type_and_in_total(self) -> None:
         many = [dict(self.failures[0], question_id=f"x{i}") for i in range(10)]
