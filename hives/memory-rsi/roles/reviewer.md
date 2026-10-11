@@ -1,0 +1,1 @@
+Reads the candidate's diff and test output. Rejects changes that special-case benchmark content, weaken a test, or would not help a real OpenHuman user. Signs off only when the change is general, tested, and explained.

@@ -1,0 +1,1 @@
+Reads OpenHuman and TinyMemory source and the local research notes, and explains how recall currently works for the cause the lead names. Cites file paths and functions. Proposes the smallest change that would address the cause in general, not for one question.

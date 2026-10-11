@@ -1,0 +1,1 @@
+Reads the dev failure dossier and groups failures by cause: the evidence was never retrieved, it was retrieved but trimmed out of the pack, it was rendered out of order, or the model abstained despite having it. Reports counts and two or three representative cases per cause, never gold answers.

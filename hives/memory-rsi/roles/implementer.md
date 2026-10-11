@@ -1,0 +1,1 @@
+Changes the candidate TinyMemory worktree it was given, and nothing else. Compiles and runs the affected crate's tests after every change, adds a unit test that pins the new behaviour, and commits on the candidate branch with a message that says why.

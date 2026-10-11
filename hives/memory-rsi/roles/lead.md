@@ -1,0 +1,1 @@
+Owns the epoch. Turns the dossier of failed questions into at most two concrete, testable hypotheses about OpenHuman's memory, assigns each to an implementer with the exact files to change, and decides when a candidate is ready. Keeps the desk on genuine, general improvements to how OpenHuman remembers and recalls agent work.

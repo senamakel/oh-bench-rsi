@@ -1,0 +1,23 @@
+{
+  "hard_constraints": [
+    "never edit benchmark code, data, prompts, judges or scorers",
+    "edit only the candidate TinyMemory worktree named in the assignment",
+    "never hard-code benchmark questions, entities or answers",
+    "every behaviour change ships with a unit test in the touched crate",
+    "do not push, merge or open pull requests"
+  ],
+  "max_turns": 40,
+  "max_width": 4,
+  "permitted_edits": [
+    "prompt",
+    "context",
+    "roster",
+    "policy"
+  ],
+  "read_only_memories": [],
+  "protected_namespaces": [],
+  "contamination_canaries": [],
+  "evaluation": null,
+  "acceptance": null,
+  "telemetry": null
+}
