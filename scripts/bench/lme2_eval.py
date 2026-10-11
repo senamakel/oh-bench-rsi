@@ -56,6 +56,14 @@ CORTEX_INGEST_ENV = {
     "CORTEX_ENRICHMENT_CONCURRENCY": "16",
     # Enrich events already on disk when a data directory is reopened.
     "CORTEX_ENRICHMENT_BACKFILL": "1",
+    # Cost bounds. Measured on this haystack, full enrichment costs ~$0.004
+    # per event (~$7 for 1,737), more than one $5 run. TinyMemory recall
+    # does not read the entity graph (45% of the calls), and fact extraction
+    # needs the gist of an event, not a whole page dump: embeddings and
+    # recall still index the full text.
+    "CORTEX_ENTITY_GRAPH": "0",
+    "CORTEX_ENRICHMENT_LONG_TEXT_MAX_BYTES": "3072",
+    "CORTEX_ENRICHMENT_MAX_LLM_CALLS_PER_EVENT": "2",
 }
 WRITE_PATH = [
     "vendor/tinymemory/crates/tinymemory-api",
@@ -139,7 +147,7 @@ def start_cortex(name: str, data_dir: pathlib.Path, gateway: str, log: Log) -> s
         "CORTEX_ENRICHMENT_API_KEY": "dummy", "CORTEX_ENRICHMENT_MODEL": MODEL, "CORTEX_ENRICHMENT_DELAY_SECONDS": "0",
         "CORTEX_ANSWER_PROVIDER": "openai", "CORTEX_ANSWER_URL": inference, "CORTEX_ANSWER_API_KEY": "dummy",
         "CORTEX_ANSWER_MODEL": MODEL, "CORTEX_VERIFIER_URL": inference, "CORTEX_VERIFIER_API_KEY": "dummy",
-        "CORTEX_VERIFIER_MODEL": MODEL, "CORTEX_VERIFIER_MAX_TOKENS": "4096", "CORTEX_ENTITY_GRAPH": "1",
+        "CORTEX_VERIFIER_MODEL": MODEL, "CORTEX_VERIFIER_MAX_TOKENS": "4096",
         "CORTEX_V1_LAYERS_AUTO": "1", "CORTEX_AUTO_ROUTE": "1", "CORTEX_CONSOLIDATION_MIN_AGE_HOURS": "0",
         **CORTEX_INGEST_ENV,
     }
