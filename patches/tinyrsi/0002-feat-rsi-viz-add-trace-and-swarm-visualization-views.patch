@@ -1,0 +1,299 @@
+From 2abbf62ecbfd043325addeb849a5aee56b573c19 Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 18:13:05 +0530
+Subject: [PATCH 2/5] feat(rsi-viz): add trace and swarm visualization views
+
+Add TraceView and SwarmView components to the rsi-viz app so run traces and swarm state can be inspected visually.
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ apps/rsi-viz/components/SwarmView.tsx | 215 ++++++++++++++++++++++++++
+ apps/rsi-viz/components/TraceView.tsx |  22 ++-
+ 2 files changed, 235 insertions(+), 2 deletions(-)
+ create mode 100644 apps/rsi-viz/components/SwarmView.tsx
+
+diff --git a/apps/rsi-viz/components/SwarmView.tsx b/apps/rsi-viz/components/SwarmView.tsx
+new file mode 100644
+index 0000000..0ec76ab
+--- /dev/null
++++ b/apps/rsi-viz/components/SwarmView.tsx
+@@ -0,0 +1,215 @@
++/**
++ * One swarm at work: who is on the desk, who is talking to whom, what each
++ * seat is doing right now, and what it is costing against the run's caps.
++ */
++
++import { formatDuration } from "@/lib/format";
++import type { SwarmSeat, SwarmState } from "@/lib/swarm";
++
++const usd = (v: number) => `$${v.toFixed(v < 1 ? 4 : 2)}`;
++const tokens = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v));
++
++function Gauge({ label, value, limit }: { label: string; value: number; limit: number | null }) {
++  const pct = limit ? Math.min(100, (value / limit) * 100) : 0;
++  const tone = pct > 90 ? "var(--reject)" : pct > 70 ? "var(--inconclusive)" : "var(--series)";
++  return (
++    <div style={{ minWidth: 200, flex: 1 }}>
++      <div className="secondary" style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
++        <span>{label}</span>
++        <span className="mono">
++          {usd(value)}
++          {limit !== null ? ` / ${usd(limit)}` : ""}
++        </span>
++      </div>
++      <div style={{ height: 8, borderRadius: 4, background: "var(--grid)", overflow: "hidden", marginTop: 4 }}>
++        <div style={{ width: `${pct}%`, height: "100%", background: tone }} />
++      </div>
++    </div>
++  );
++}
++
++function SeatCard({ seat, spend }: { seat: SwarmSeat; spend: number | undefined }) {
++  return (
++    <div className="card" style={{ padding: 12, borderColor: seat.activeTool ? "var(--series)" : undefined }}>
++      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
++        <strong className="mono">@{seat.id}</strong>
++        <span className="badge">{seat.role || "seat"}</span>
++        {seat.editing ? <span className="badge accept">editing</span> : <span className="badge">read-only</span>}
++        {seat.activeTool ? <span className="badge live">{seat.activeTool}</span> : null}
++      </div>
++      <dl className="facts" style={{ marginTop: 8 }}>
++        <div>
++          <dt>Turns</dt>
++          <dd>{seat.turns}</dd>
++        </div>
++        <div>
++          <dt>Tools</dt>
++          <dd>
++            {seat.toolCalls}
++            {seat.toolFailures ? <span className="muted"> ({seat.toolFailures} failed)</span> : null}
++          </dd>
++        </div>
++        <div>
++          <dt>Tokens</dt>
++          <dd className="mono">
++            {tokens(seat.inputTokens)} in · {tokens(seat.outputTokens)} out
++          </dd>
++        </div>
++        <div>
++          <dt>Spend</dt>
++          <dd className="mono">{usd(spend ?? seat.costUsd)}</dd>
++        </div>
++      </dl>
++      <p className="muted mono" style={{ margin: "6px 0 0", fontSize: 11, overflowWrap: "anywhere" }}>
++        {seat.model} · {seat.actionDir}
++      </p>
++    </div>
++  );
++}
++
++/** Seats on a circle (the host at the centre), edges weighted by message count. */
++function InteractionGraph({ state }: { state: SwarmState }) {
++  const size = 320;
++  const c = size / 2;
++  const r = size / 2 - 50;
++  const pos: Record<string, { x: number; y: number }> = { host: { x: c, y: c } };
++  state.order.forEach((id, i) => {
++    const a = (2 * Math.PI * i) / Math.max(state.order.length, 1) - Math.PI / 2;
++    pos[id] = { x: c + r * Math.cos(a), y: c + r * Math.sin(a) };
++  });
++  const max = Math.max(1, ...Object.values(state.edges));
++  return (
++    <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Messages between seats" style={{ width: "100%", maxWidth: 360 }}>
++      <defs>
++        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
++          <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-2)" />
++        </marker>
++      </defs>
++      {Object.entries(state.edges).map(([key, count]) => {
++        const [from, to] = key.split("→");
++        const a = pos[from];
++        const b = pos[to];
++        if (!a || !b || from === to) return null;
++        const dx = b.x - a.x;
++        const dy = b.y - a.y;
++        const len = Math.hypot(dx, dy) || 1;
++        const pad = 26;
++        return (
++          <g key={key}>
++            <line
++              x1={a.x + (dx / len) * pad}
++              y1={a.y + (dy / len) * pad}
++              x2={b.x - (dx / len) * pad}
++              y2={b.y - (dy / len) * pad}
++              stroke="var(--ink-2)"
++              strokeOpacity={0.35 + 0.65 * (count / max)}
++              strokeWidth={1 + 3 * (count / max)}
++              markerEnd="url(#arrow)"
++            />
++            <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 4} fontSize="10" fill="var(--muted)" textAnchor="middle">
++              {count}
++            </text>
++          </g>
++        );
++      })}
++      {Object.entries(pos).map(([id, p]) => {
++        const seat = state.seats[id];
++        const fill = id === "host" ? "var(--grid)" : seat?.activeTool ? "var(--series)" : "var(--surface)";
++        return (
++          <g key={id}>
++            <circle cx={p.x} cy={p.y} r={22} fill={fill} stroke="var(--axis)" />
++            <text x={p.x} y={p.y + 36} fontSize="11" fill="var(--ink)" textAnchor="middle" className="mono">
++              {id}
++            </text>
++          </g>
++        );
++      })}
++    </svg>
++  );
++}
++
++export function SwarmView({ state }: { state: SwarmState }) {
++  const spend = state.spend;
++  const recentTools = [...state.tools].reverse().slice(0, 40);
++  return (
++    <div className="stack">
++      <section>
++        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", alignItems: "center" }}>
++          <h1 className="mono">{state.run ?? state.hive ?? "swarm"}</h1>
++          <span className={`badge${state.finished ? "" : " live"}`}>
++            {state.finished ? `finished · ${state.finished.reason}` : "swarm running"}
++          </span>
++        </div>
++        <p className="secondary" style={{ margin: 0 }}>
++          hive <code>{state.hive}</code> · desk <code>{state.desk}</code> · {state.order.length} seats ·{" "}
++          {state.messages.length} messages · {formatDuration(state.elapsedMs)}
++        </p>
++      </section>
++
++      {spend ? (
++        <section className="card" style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
++          <Gauge label="Run budget" value={spend.runUsd} limit={spend.runLimitUsd} />
++          <Gauge label="Campaign budget" value={spend.totalUsd} limit={spend.totalLimitUsd} />
++        </section>
++      ) : null}
++
++      <div className="grid two">
++        <section className="card">
++          <h2>Who talks to whom</h2>
++          <InteractionGraph state={state} />
++        </section>
++        <section className="stack">
++          {state.order.map((id) => (
++            <SeatCard key={id} seat={state.seats[id]} spend={spend?.bySeat[id]} />
++          ))}
++        </section>
++      </div>
++
++      <section className="card">
++        <h2>Desk transcript</h2>
++        {state.messages.length === 0 ? (
++          <p className="notice">No messages yet.</p>
++        ) : (
++          <ol className="feed">
++            {[...state.messages].reverse().map((m) => (
++              <li key={m.seq}>
++                <div className="head">
++                  <span className="mono">@{m.from}</span>
++                  <span className="muted">→ {m.onlyFor.length ? m.onlyFor.map((t) => `@${t}`).join(", ") : m.to}</span>
++                  <span className="muted mono">#{m.sequence}</span>
++                </div>
++                <pre style={{ whiteSpace: "pre-wrap", margin: "6px 0 0", fontSize: 12, maxHeight: 260, overflow: "auto" }}>
++                  {m.body}
++                </pre>
++              </li>
++            ))}
++          </ol>
++        )}
++      </section>
++
++      <section className="card">
++        <h2>Tool calls</h2>
++        {recentTools.length === 0 ? (
++          <p className="notice">No tool calls yet.</p>
++        ) : (
++          <ol className="feed">
++            {recentTools.map((t) => (
++              <li key={t.seq} className={t.success === false ? "reject" : undefined}>
++                <div className="head">
++                  <span className="mono">@{t.seat}</span>
++                  <span className="mono">{t.tool}</span>
++                  <span className="muted">{t.phase === "started" ? "started" : t.success === false ? "failed" : "done"}</span>
++                </div>
++                {t.detail ? (
++                  <p className="muted mono" style={{ margin: "4px 0 0", fontSize: 11, overflowWrap: "anywhere" }}>
++                    {t.detail}
++                  </p>
++                ) : null}
++              </li>
++            ))}
++          </ol>
++        )}
++      </section>
++    </div>
++  );
++}
+diff --git a/apps/rsi-viz/components/TraceView.tsx b/apps/rsi-viz/components/TraceView.tsx
+index 8400158..182f3ad 100644
+--- a/apps/rsi-viz/components/TraceView.tsx
++++ b/apps/rsi-viz/components/TraceView.tsx
+@@ -8,11 +8,13 @@
+ 
+ import { useEffect, useReducer, useState } from "react";
+ import { formatDuration, formatMetric, shortId } from "@/lib/format";
++import { applySwarmBatch, initialSwarmState, isSwarmLine, type SwarmState } from "@/lib/swarm";
+ import { initialViewState, runStatus, viewReducer } from "@/lib/view";
+ import { Lineage } from "./Lineage";
+ import { LoopRing } from "./LoopRing";
+ import { MetricChart } from "./MetricChart";
+ import { ProposalsFeed } from "./ProposalsFeed";
++import { SwarmView } from "./SwarmView";
+ 
+ const REASON_LABEL = {
+   goal_reached: "goal reached",
+@@ -24,6 +26,12 @@ const REASON_LABEL = {
+ 
+ export function TraceView({ runId }: { runId: string }) {
+   const [view, dispatch] = useReducer(viewReducer, undefined, initialViewState);
++  const [swarm, swarmDispatch] = useReducer(
++    (state: SwarmState, action: { type: "batch"; data: string } | { type: "reset" }) =>
++      action.type === "reset" ? initialSwarmState() : applySwarmBatch(state, action.data),
++    undefined,
++    initialSwarmState,
++  );
+   const [connected, setConnected] = useState(true);
+   const [now, setNow] = useState(() => Date.now());
+ 
+@@ -32,9 +40,17 @@ export function TraceView({ runId }: { runId: string }) {
+     source.onopen = () => setConnected(true);
+     source.onerror = () => setConnected(source.readyState === EventSource.OPEN);
+     source.onmessage = (message: MessageEvent<string>) => {
+-      dispatch({ type: "batch", data: message.data, now: Date.now() });
++      // Swarm lines fold into their own state; everything else is the loop trace.
++      const lines = message.data.split("\n");
++      const swarmLines = lines.filter(isSwarmLine);
++      if (swarmLines.length > 0) swarmDispatch({ type: "batch", data: swarmLines.join("\n") });
++      const loopLines = lines.filter((l) => !isSwarmLine(l));
++      dispatch({ type: "batch", data: loopLines.join("\n"), now: Date.now() });
+     };
+-    source.addEventListener("reset", () => dispatch({ type: "reset" }));
++    source.addEventListener("reset", () => {
++      dispatch({ type: "reset" });
++      swarmDispatch({ type: "reset" });
++    });
+     source.addEventListener("ready", (message) => {
+       let mtimeMs: number | null = null;
+       try {
+@@ -53,6 +69,8 @@ export function TraceView({ runId }: { runId: string }) {
+     return () => clearInterval(timer);
+   }, []);
+ 
++  if (swarm.order.length > 0) return <SwarmView state={swarm} />;
++
+   const run = view.run;
+   const status = runStatus(view, now);
+   const goal = run.goal;
+-- 
+2.50.1 (Apple Git-155)
+
