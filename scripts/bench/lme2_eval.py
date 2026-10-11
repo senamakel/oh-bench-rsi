@@ -54,8 +54,9 @@ MOUNT_ROOT = pathlib.Path(os.environ.get("OHRSI_MOUNT_ROOT", str(ROOT.parents[1]
 CORTEX_INGEST_ENV = {
     "CORTEX_ENRICHMENT_SCAN_CHUNK": "4096",
     "CORTEX_ENRICHMENT_CONCURRENCY": "16",
-    # Enrich events already on disk when a data directory is reopened.
-    "CORTEX_ENRICHMENT_BACKFILL": "1",
+    # No CORTEX_ENRICHMENT_BACKFILL: a restored snapshot must not re-enrich
+    # (measured: a backfill restart re-dispatched 1,168 jobs). Backfill is
+    # only for salvaging a live container with lme2_snapshot.py.
     # Cost bounds. Measured on this haystack, full enrichment costs ~$0.004
     # per event (~$7 for 1,737), more than one $5 run. TinyMemory recall
     # does not read the entity graph (45% of the calls), and fact extraction
