@@ -58,7 +58,7 @@ and writes into `$RSI_OUT`:
 - `result.json` — `score` (dev accuracy), `splits.dev.items` and
   `splits.test.items` (per-question 0/1), `failures` (dev only) and `metrics`
   (`dev_accuracy`, `dev_pack_tokens_mean`,
-  `dev_accuracy_<type>`);
+  `dev_accuracy_<type>`) and `private` (`test_accuracy`, never shown to the hive);
 - `summary.json`, `dev_failures.jsonl`, `eval.log`, `harness.log`,
   `memd.log`, `cortex.log`;
 - on failure, `cortex-data/`, which `scripts/bench/lme2_snapshot.py` can
