@@ -59,6 +59,18 @@ class LeakageTest(unittest.TestCase):
     def test_ignores_a_shorter_question_fragment(self) -> None:
         self.assertEqual(self.check(QUESTION[20:50]), {})
 
+    def test_a_gold_fragment_the_incumbent_already_contains_is_not_new_content(self) -> None:
+        added = leakage.added_text(diff('/// order hits by "express overnight" shipping weight'))
+        known = "// the express overnight tier ranks first"
+        self.assertEqual(leakage.leaks(added, self.questions, self.answers, known=known), {})
+        self.assertEqual(leakage.leaks(added, self.questions, self.answers), {"gold answer": 1})
+
+    def test_known_text_never_excuses_canaries_or_question_text(self) -> None:
+        added = leakage.added_text(diff('// magento', "// " + QUESTION[20:62]))
+        known = "magento " + QUESTION
+        self.assertEqual(leakage.leaks(added, self.questions, self.answers, known=known),
+                         {"canary": 1, "question text": 1})
+
 
 class GreenTest(unittest.TestCase):
     def test_touched_crates_are_the_sorted_crate_directories(self) -> None:
