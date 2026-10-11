@@ -3,6 +3,10 @@
 **/*.rs.bk
 *.pdb
 
+# Python bytecode
+__pycache__/
+*.py[cod]
+
 # Coverage output
 /coverage/
 /coverage.json
