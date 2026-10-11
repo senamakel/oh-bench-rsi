@@ -252,11 +252,12 @@ async fn run(options: Options) -> anyhow::Result<()> {
         })
         .await?;
 
-    let watcher = tokio::spawn(watch(coordinator.clone(), desk.id.clone(), desk.members.clone(), ledger_dir, trace.clone()));
+    let seen = Arc::new(std::sync::Mutex::new(BTreeSet::new()));
+    let watcher = tokio::spawn(watch(coordinator.clone(), seen.clone(), ledger_dir, trace.clone()));
     let outcome = tokio::time::timeout(options.wall, coordinator.run_until_idle()).await;
     tokio::time::sleep(Duration::from_secs(3)).await;
     watcher.abort();
-    flush_messages(&coordinator, &desk.id, &desk.members, &mut BTreeSet::new(), &trace);
+    flush_messages(&coordinator, &seen, &trace);
     let (report, reason) = match outcome {
         Ok(Ok(report)) => (json!({"completed": report.completed, "failed": report.failed, "parked": report.parked}), "idle"),
         Ok(Err(error)) => (json!({"error": error.to_string()}), "coordinator_error"),
@@ -276,12 +277,11 @@ async fn run(options: Options) -> anyhow::Result<()> {
 }
 
 /// Mirrors new desk and direct messages, and the run's spend, into the trace.
-async fn watch(coordinator: Coordinator, desk: String, members: Vec<String>, run_dir: PathBuf, trace: Arc<Trace>) {
-    let mut seen = BTreeSet::new();
+async fn watch(coordinator: Coordinator, seen: Arc<std::sync::Mutex<BTreeSet<u64>>>, run_dir: PathBuf, trace: Arc<Trace>) {
     let mut meter_offset = 0usize;
     let mut by_seat: BTreeMap<String, f64> = BTreeMap::new();
     loop {
-        flush_messages(&coordinator, &desk, &members, &mut seen, &trace);
+        flush_messages(&coordinator, &seen, &trace);
         if let Ok(text) = std::fs::read_to_string(run_dir.join("meter.jsonl")) {
             for line in text[meter_offset.min(text.len())..].lines() {
                 if let Ok(row) = serde_json::from_str::<Value>(line) {
@@ -304,7 +304,8 @@ fn read_json(path: &Path) -> anyhow::Result<Value> {
     Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?)
 }
 
-fn flush_messages(coordinator: &Coordinator, _desk: &str, _members: &[String], seen: &mut BTreeSet<u64>, trace: &Trace) {
+fn flush_messages(coordinator: &Coordinator, seen: &std::sync::Mutex<BTreeSet<u64>>, trace: &Trace) {
+    let mut seen = seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     // The host-scope transcript holds desk posts *and* seat-to-seat direct
     // messages, private rows included; agent-scope reads would miss DMs.
     let after = seen.iter().next_back().copied();
