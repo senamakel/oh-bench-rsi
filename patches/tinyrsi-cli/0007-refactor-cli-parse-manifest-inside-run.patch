@@ -1,0 +1,68 @@
+From fe307203f854c343271afedb9a05a5486bc63de9 Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 21:31:51 +0530
+Subject: [PATCH 7/9] refactor(cli): parse manifest inside run
+
+The run command now parses the manifest itself instead of receiving an already parsed value from the caller, removing the redundant parse in the execute path and keeping manifest loading in one place.
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ crates/tinyrsi-cli/src/cli/mod.rs | 13 ++-----------
+ crates/tinyrsi-cli/src/cli/run.rs |  2 +-
+ 2 files changed, 3 insertions(+), 12 deletions(-)
+
+diff --git a/crates/tinyrsi-cli/src/cli/mod.rs b/crates/tinyrsi-cli/src/cli/mod.rs
+index 2500c38..2c89556 100644
+--- a/crates/tinyrsi-cli/src/cli/mod.rs
++++ b/crates/tinyrsi-cli/src/cli/mod.rs
+@@ -151,7 +151,7 @@ pub fn execute(
+             env,
+         } => {
+             let files = with_env(manifest::load_dir(&r#loop)?, &env)?;
+-            let parsed = manifest::parse(&files)?;
++            manifest::parse(&files)?;
+             let server = if no_serve {
+                 None
+             } else {
+@@ -160,16 +160,7 @@ pub fn execute(
+             if let Some(server) = &server {
+                 say(out, &format!("ui: {}", server.url()))?;
+             }
+-            run::run(
+-                &parsed,
+-                &files,
+-                &r#loop,
+-                &store,
+-                run.as_deref(),
+-                epochs,
+-                lookup,
+-                out,
+-            )
++            run::run(&files, &r#loop, &store, run.as_deref(), epochs, lookup, out)
+         }
+         Command::Score {
+             r#loop,
+diff --git a/crates/tinyrsi-cli/src/cli/run.rs b/crates/tinyrsi-cli/src/cli/run.rs
+index f45a727..7e3c70a 100644
+--- a/crates/tinyrsi-cli/src/cli/run.rs
++++ b/crates/tinyrsi-cli/src/cli/run.rs
+@@ -107,7 +107,6 @@ fn judges(parsed: &Loop, gateway: &Gateway) -> Result<Judges> {
+ 
+ /// `tinyrsi run`.
+ pub(super) fn run(
+-    parsed: &Loop,
+     files: &BTreeMap<String, String>,
+     loop_dir: &Path,
+     store: &Store,
+@@ -116,6 +115,7 @@ pub(super) fn run(
+     lookup: &dyn Fn(&str) -> Option<String>,
+     out: &mut dyn Write,
+ ) -> Result<()> {
++    let parsed = &manifest::parse(files)?;
+     let keys = Keys::resolve(parsed, loop_dir, lookup)?;
+     let run = store.create_run(&parsed.manifest.name, run_id, files)?;
+     say(
+-- 
+2.50.1 (Apple Git-155)
+

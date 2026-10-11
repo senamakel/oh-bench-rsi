@@ -1,0 +1,152 @@
+From 300fbfb1063f8007c704affefe18f547022cd1b4 Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 21:28:19 +0530
+Subject: [PATCH 3/9] feat(cli): add run subcommand
+
+Add a run subcommand to the CLI so users can execute the tool directly
+from the command line. The new module wires the subcommand into the
+existing CLI dispatch.
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ crates/tinyrsi-cli/src/cli/mod.rs | 56 +++++++++++++++++++++++++++++--
+ crates/tinyrsi-cli/src/cli/run.rs |  4 +--
+ 2 files changed, 56 insertions(+), 4 deletions(-)
+
+diff --git a/crates/tinyrsi-cli/src/cli/mod.rs b/crates/tinyrsi-cli/src/cli/mod.rs
+index 1f47b29..db8ba7d 100644
+--- a/crates/tinyrsi-cli/src/cli/mod.rs
++++ b/crates/tinyrsi-cli/src/cli/mod.rs
+@@ -5,6 +5,7 @@
+ //! run fails, 2 for invalid input (a malformed loop folder or arguments).
+ 
+ use std::{
++    collections::BTreeMap,
+     io::Write,
+     net::SocketAddr,
+     path::{Path, PathBuf},
+@@ -58,6 +59,10 @@ pub enum Command {
+         /// Do not serve the UI.
+         #[arg(long)]
+         no_serve: bool,
++        /// Extra step environment, `KEY=VALUE`, overriding `rsi.json`'s `env`;
++        /// recorded in the run's copy of the loop. Repeatable.
++        #[arg(long = "env", value_name = "KEY=VALUE")]
++        env: Vec<String>,
+     },
+     /// Score one checkout with the loop's scorers, outside any run.
+     Score {
+@@ -69,6 +74,10 @@ pub enum Command {
+         /// Checkout to score; defaults to the subject's incumbent.
+         #[arg(long)]
+         checkout: Option<PathBuf>,
++        /// Extra step environment, `KEY=VALUE`, overriding `rsi.json`'s `env`.
++        /// Repeatable.
++        #[arg(long = "env", value_name = "KEY=VALUE")]
++        env: Vec<String>,
+     },
+     /// List stored runs, newest first.
+     Runs {
+@@ -139,8 +148,10 @@ pub fn execute(
+             epochs,
+             port,
+             no_serve,
++            env,
+         } => {
+-            let parsed = load(&r#loop)?;
++            let files = with_env(manifest::load_dir(&r#loop)?, &env)?;
++            let parsed = manifest::parse(&files)?;
+             let server = if no_serve {
+                 None
+             } else {
+@@ -151,6 +162,7 @@ pub fn execute(
+             }
+             run::run(
+                 &parsed,
++                &files,
+                 &r#loop,
+                 &store,
+                 run.as_deref(),
+@@ -163,8 +175,9 @@ pub fn execute(
+             r#loop,
+             label,
+             checkout,
++            env,
+         } => {
+-            let parsed = load(&r#loop)?;
++            let parsed = manifest::parse(&with_env(manifest::load_dir(&r#loop)?, &env)?)?;
+             run::score(
+                 &parsed,
+                 &r#loop,
+@@ -249,6 +262,45 @@ fn show(store: &Store, run: &str, out: &mut dyn Write) -> Result<()> {
+     say(out, &format!("folder    {}", dir.path.display()))
+ }
+ 
++/// The loop folder's files with `overrides` (`KEY=VALUE`) merged into
++/// `rsi.json`'s `env`, so a run's frozen copy records what its steps saw.
++/// The result still goes through [`manifest::parse`], which validates names.
++fn with_env(
++    mut files: BTreeMap<String, String>,
++    overrides: &[String],
++) -> Result<BTreeMap<String, String>> {
++    if overrides.is_empty() {
++        return Ok(files);
++    }
++    let source = files.get(manifest::MANIFEST).ok_or_else(|| Error::MissingFile {
++        path: manifest::MANIFEST.into(),
++    })?;
++    let mut value: serde_json::Value =
++        serde_json::from_str(source).map_err(|e| Error::Json {
++            message: e.to_string(),
++        })?;
++    let env = value
++        .as_object_mut()
++        .ok_or_else(|| Error::field("rsi.json", "must be a JSON object"))?
++        .entry("env")
++        .or_insert_with(|| serde_json::json!({}));
++    let env = env
++        .as_object_mut()
++        .ok_or_else(|| Error::field("env", "must be an object"))?;
++    for pair in overrides {
++        let (key, val) = pair
++            .split_once('=')
++            .filter(|(key, _)| !key.is_empty())
++            .ok_or_else(|| Error::field(format!("--env {pair}"), "expected KEY=VALUE"))?;
++        env.insert(key.to_owned(), serde_json::Value::String(val.to_owned()));
++    }
++    let text = serde_json::to_string_pretty(&value).map_err(|e| Error::Json {
++        message: e.to_string(),
++    })?;
++    files.insert(manifest::MANIFEST.to_owned(), text + "\n");
++    Ok(files)
++}
++
+ fn load(dir: &Path) -> Result<Loop> {
+     manifest::parse(&manifest::load_dir(dir)?)
+ }
+diff --git a/crates/tinyrsi-cli/src/cli/run.rs b/crates/tinyrsi-cli/src/cli/run.rs
+index d27f6d5..f45a727 100644
+--- a/crates/tinyrsi-cli/src/cli/run.rs
++++ b/crates/tinyrsi-cli/src/cli/run.rs
+@@ -108,6 +108,7 @@ fn judges(parsed: &Loop, gateway: &Gateway) -> Result<Judges> {
+ /// `tinyrsi run`.
+ pub(super) fn run(
+     parsed: &Loop,
++    files: &BTreeMap<String, String>,
+     loop_dir: &Path,
+     store: &Store,
+     run_id: Option<&str>,
+@@ -116,8 +117,7 @@ pub(super) fn run(
+     out: &mut dyn Write,
+ ) -> Result<()> {
+     let keys = Keys::resolve(parsed, loop_dir, lookup)?;
+-    let files = manifest::load_dir(loop_dir)?;
+-    let run = store.create_run(&parsed.manifest.name, run_id, &files)?;
++    let run = store.create_run(&parsed.manifest.name, run_id, files)?;
+     say(
+         out,
+         &format!(
+-- 
+2.50.1 (Apple Git-155)
+

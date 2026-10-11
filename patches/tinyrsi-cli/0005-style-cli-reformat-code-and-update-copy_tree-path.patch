@@ -1,0 +1,85 @@
+From 88d97025e1b324aae3ad671b11707176ab4ffd45 Mon Sep 17 00:00:00 2001
+From: Steven Enamakel <enamakel@tinyhumans.ai>
+Date: Sun, 11 Oct 2026 21:29:18 +0530
+Subject: [PATCH 5/9] style(cli): reformat code and update copy_tree path
+
+Reformatted the manifest env override handling and its tests to satisfy
+rustfmt, and pointed the score test at crate::subject::copy_tree after
+the helper moved.
+
+Auto-committed-on: macbook
+Co-authored-by: Medulla <medulla@tinyhumans.ai>
+---
+ crates/tinyrsi-cli/src/cli/mod.rs  | 13 +++++++------
+ crates/tinyrsi-cli/src/cli/test.rs | 17 +++++++++++++----
+ 2 files changed, 20 insertions(+), 10 deletions(-)
+
+diff --git a/crates/tinyrsi-cli/src/cli/mod.rs b/crates/tinyrsi-cli/src/cli/mod.rs
+index db8ba7d..2500c38 100644
+--- a/crates/tinyrsi-cli/src/cli/mod.rs
++++ b/crates/tinyrsi-cli/src/cli/mod.rs
+@@ -272,13 +272,14 @@ fn with_env(
+     if overrides.is_empty() {
+         return Ok(files);
+     }
+-    let source = files.get(manifest::MANIFEST).ok_or_else(|| Error::MissingFile {
+-        path: manifest::MANIFEST.into(),
+-    })?;
+-    let mut value: serde_json::Value =
+-        serde_json::from_str(source).map_err(|e| Error::Json {
+-            message: e.to_string(),
++    let source = files
++        .get(manifest::MANIFEST)
++        .ok_or_else(|| Error::MissingFile {
++            path: manifest::MANIFEST.into(),
+         })?;
++    let mut value: serde_json::Value = serde_json::from_str(source).map_err(|e| Error::Json {
++        message: e.to_string(),
++    })?;
+     let env = value
+         .as_object_mut()
+         .ok_or_else(|| Error::field("rsi.json", "must be a JSON object"))?
+diff --git a/crates/tinyrsi-cli/src/cli/test.rs b/crates/tinyrsi-cli/src/cli/test.rs
+index 5ba27ad..77c25d6 100644
+--- a/crates/tinyrsi-cli/src/cli/test.rs
++++ b/crates/tinyrsi-cli/src/cli/test.rs
+@@ -244,15 +244,24 @@ fn env_overrides_merge_into_the_manifest_and_reject_malformed_pairs() {
+     let files = manifest::load_dir(&example()).unwrap();
+     let merged = with_env(files.clone(), &["LIMIT=5".into(), "MODE=a=b".into()]).unwrap();
+     let parsed = manifest::parse(&merged).unwrap();
+-    assert_eq!(parsed.manifest.env.get("LIMIT").map(String::as_str), Some("5"));
+-    assert_eq!(parsed.manifest.env.get("MODE").map(String::as_str), Some("a=b"));
++    assert_eq!(
++        parsed.manifest.env.get("LIMIT").map(String::as_str),
++        Some("5")
++    );
++    assert_eq!(
++        parsed.manifest.env.get("MODE").map(String::as_str),
++        Some("a=b")
++    );
+     assert_eq!(with_env(files.clone(), &[]).unwrap(), files);
+     for bad in ["NOEQUALS", "=value"] {
+         let err = with_env(files.clone(), &[bad.into()]).unwrap_err();
+         assert!(matches!(err, Error::Field { .. }), "{bad}: {err:?}");
+     }
+     let reserved = with_env(files, &["RSI_OUT=x".into()]).unwrap();
+-    assert!(matches!(manifest::parse(&reserved), Err(Error::Field { .. })));
++    assert!(matches!(
++        manifest::parse(&reserved),
++        Err(Error::Field { .. })
++    ));
+ }
+ 
+ #[test]
+@@ -260,7 +269,7 @@ fn score_passes_env_overrides_to_the_scorer() {
+     let home = tempfile::tempdir().unwrap();
+     let root = tempfile::tempdir().unwrap();
+     let dir = root.path().join("loop");
+-    crate::step::copy_tree(&example(), &dir).unwrap();
++    crate::subject::copy_tree(&example(), &dir).unwrap();
+     std::fs::write(
+         dir.join("scorers/colors.py"),
+         "import os\nprint(f\"METRIC colors={os.environ['COLORS']}\")\n",
+-- 
+2.50.1 (Apple Git-155)
+
