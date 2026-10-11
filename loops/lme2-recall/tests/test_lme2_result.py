@@ -138,38 +138,39 @@ class SettledOnRestoreTest(unittest.TestCase):
 
 
 class CortexEnvTest(unittest.TestCase):
-    """CortexDB's model calls go through the spend gateway, or, when
-    ``LME2_MEMORY_LLM_URL`` is set, its chat calls go to that router while
-    embeddings stay on the gateway (the cached index is text-embedding-3-small)."""
+    """CortexDB's model calls go through the spend gateway under the loop's
+    chat model; only embeddings may go straight to a provider, named by
+    ``LME2_EMBEDDING_URL`` and ``LME2_EMBEDDING_KEY_ENV``, since the cached
+    index needs ``text-embedding-3-small`` and the gateway's router may not
+    serve it."""
 
     GATEWAY = "http://127.0.0.1:9000"
+    TAGGED = "http://host.docker.internal:9000/__tag/ingest/cortex/v1"
 
     def test_every_call_goes_through_the_gateway_by_default(self) -> None:
-        env, secrets = lme2.cortex_env(self.GATEWAY, memory=None)
-        tagged = "http://host.docker.internal:9000/__tag/ingest/cortex/v1"
+        env, secrets = lme2.cortex_env(self.GATEWAY, model="flash", embedding=None)
         for name in ("CORTEX_EMBEDDING_URL", "CORTEX_LLM_URL", "CORTEX_ENRICHMENT_URL",
                      "CORTEX_ANSWER_URL", "CORTEX_VERIFIER_URL"):
-            self.assertEqual(env[name], tagged, name)
-        self.assertEqual(env["CORTEX_ENRICHMENT_MODEL"], lme2.MODEL)
-        self.assertEqual(secrets, [])
-
-    def test_a_memory_router_takes_the_chat_calls_and_its_key_is_never_inlined(self) -> None:
-        memory = lme2.MemoryLlm(url="http://host.docker.internal:6969/v1", model="flash", key_env="LADDER_API_KEY")
-        env, secrets = lme2.cortex_env(self.GATEWAY, memory=memory)
-        for name in ("CORTEX_LLM_URL", "CORTEX_ENRICHMENT_URL", "CORTEX_ANSWER_URL", "CORTEX_VERIFIER_URL"):
-            self.assertEqual(env[name], "http://host.docker.internal:6969/v1", name)
+            self.assertEqual(env[name], self.TAGGED, name)
         for name in ("CORTEX_LLM_MODEL", "CORTEX_ENRICHMENT_MODEL", "CORTEX_ANSWER_MODEL", "CORTEX_VERIFIER_MODEL"):
             self.assertEqual(env[name], "flash", name)
-        self.assertEqual(env["CORTEX_EMBEDDING_URL"], "http://host.docker.internal:9000/__tag/ingest/cortex/v1")
         self.assertEqual(env["CORTEX_EMBEDDING_MODEL"], lme2.EMBED)
-        self.assertIn("CORTEX_ENRICHMENT_API_KEY", secrets)
-        for name in secrets:
-            self.assertNotIn(name, env, f"{name} must be passed by name, not inlined")
+        self.assertEqual(secrets, [])
 
-    def test_memory_llm_reads_its_settings_from_the_environment(self) -> None:
-        self.assertIsNone(lme2.memory_llm({}))
-        memory = lme2.memory_llm({"LME2_MEMORY_LLM_URL": "http://h:1/v1", "LME2_MEMORY_LLM_MODEL": "flash",
-                                  "LME2_MEMORY_LLM_KEY_ENV": "LADDER_API_KEY"})
-        self.assertEqual(memory, lme2.MemoryLlm("http://h:1/v1", "flash", "LADDER_API_KEY"))
+    def test_a_direct_embedding_route_keeps_its_key_off_the_command_line(self) -> None:
+        route = lme2.EmbeddingRoute(url="https://openrouter.ai/api/v1", key_env="OPENROUTER_API_KEY")
+        env, secrets = lme2.cortex_env(self.GATEWAY, model="flash", embedding=route)
+        self.assertEqual(env["CORTEX_EMBEDDING_URL"], "https://openrouter.ai/api/v1")
+        self.assertEqual(env["CORTEX_ENRICHMENT_URL"], self.TAGGED)
+        self.assertEqual(secrets, ["CORTEX_EMBEDDING_API_KEY"])
+        self.assertNotIn("CORTEX_EMBEDDING_API_KEY", env)
+
+    def test_settings_come_from_the_environment(self) -> None:
+        self.assertEqual(lme2.chat_model({}), lme2.MODEL)
+        self.assertEqual(lme2.chat_model({"LME2_MODEL": "flash"}), "flash")
+        self.assertIsNone(lme2.embedding_route({}))
+        self.assertEqual(
+            lme2.embedding_route({"LME2_EMBEDDING_URL": "https://e/v1", "LME2_EMBEDDING_KEY_ENV": "K"}),
+            lme2.EmbeddingRoute("https://e/v1", "K"))
         with self.assertRaises(ValueError):
-            lme2.memory_llm({"LME2_MEMORY_LLM_URL": "http://h:1/v1"})
+            lme2.embedding_route({"LME2_EMBEDDING_URL": "https://e/v1"})
