@@ -1,6 +1,7 @@
 """Unit tests for ``adapters/lme2/retry.py``: the runner retries a reader
 call that came back empty, which the official harness otherwise turns into
-an abort of the whole evaluation."""
+an abort of the whole evaluation, and scores one that stays empty as no
+answer."""
 
 import asyncio
 import pathlib
@@ -37,10 +38,11 @@ class RetryEmptyTest(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertEqual(calls[0], ("client", "args", ["m"]))
 
-    def test_the_last_empty_reply_still_raises(self) -> None:
+    def test_a_reply_that_stays_empty_scores_as_no_answer(self) -> None:
         call, calls = flaky([EMPTY, EMPTY])
-        with self.assertRaises(RuntimeError):
-            asyncio.run(retry.retry_empty(call, attempts=2)())
+        text, usage = asyncio.run(retry.retry_empty(call, attempts=2)())
+        self.assertEqual(text, "")
+        self.assertEqual(usage, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
         self.assertEqual(len(calls), 2)
 
     def test_other_errors_are_not_retried(self) -> None:
