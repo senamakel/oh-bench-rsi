@@ -158,69 +158,70 @@ def ingest_key(tinymemory: pathlib.Path, haystack_ids: list[str], engine: str) -
     return hashlib.sha256(material.encode()).hexdigest()[:24], material
 
 
-class MemoryLlm(NamedTuple):
-    """An OpenAI-compatible router for CortexDB's chat calls (fact extraction,
-    answers, verification) instead of the spend gateway: ``url`` as seen from
-    a container, the router's ``model`` name, and ``key_env``, the variable
-    holding its key."""
+class EmbeddingRoute(NamedTuple):
+    """A provider CortexDB embeds through directly, instead of the gateway:
+    its OpenAI-compatible ``url`` and ``key_env``, the variable holding its
+    key (tinyrsi passes plain ``keys`` to steps)."""
 
     url: str
-    model: str
     key_env: str
 
 
-# CortexDB's API-key variables for its chat calls.
-CHAT_KEY_VARS = ["OPENAI_API_KEY", "CORTEX_ENTITY_API_KEY", "CORTEX_ENRICHMENT_API_KEY",
-                 "CORTEX_ANSWER_API_KEY", "CORTEX_VERIFIER_API_KEY"]
+def chat_model(environ: dict) -> str:
+    """The chat model for the reader, the judge and CortexDB: ``LME2_MODEL``,
+    the name the gateway's upstream knows it by, else ``MODEL``."""
+    return environ.get("LME2_MODEL", "").strip() or MODEL
 
 
-def memory_llm(environ: dict) -> "MemoryLlm | None":
-    """The memory router from ``LME2_MEMORY_LLM_URL``, ``_MODEL`` and
-    ``_KEY_ENV``, or ``None`` when no URL is set."""
-    url = environ.get("LME2_MEMORY_LLM_URL", "").strip()
+def embedding_route(environ: dict) -> "EmbeddingRoute | None":
+    """The direct embedding route from ``LME2_EMBEDDING_URL`` and
+    ``LME2_EMBEDDING_KEY_ENV``, or ``None`` to embed through the gateway."""
+    url = environ.get("LME2_EMBEDDING_URL", "").strip()
     if not url:
         return None
-    model = environ.get("LME2_MEMORY_LLM_MODEL", "").strip()
-    key_env = environ.get("LME2_MEMORY_LLM_KEY_ENV", "").strip()
-    if not model or not key_env:
-        raise ValueError("LME2_MEMORY_LLM_URL needs LME2_MEMORY_LLM_MODEL and LME2_MEMORY_LLM_KEY_ENV")
-    return MemoryLlm(url, model, key_env)
+    key_env = environ.get("LME2_EMBEDDING_KEY_ENV", "").strip()
+    if not key_env:
+        raise ValueError("LME2_EMBEDDING_URL needs LME2_EMBEDDING_KEY_ENV")
+    return EmbeddingRoute(url, key_env)
 
 
-def cortex_env(gateway: str, memory: "MemoryLlm | None") -> tuple[dict, list[str]]:
+def cortex_env(gateway: str, model: str, embedding: "EmbeddingRoute | None") -> tuple[dict, list[str]]:
     """CortexDB's environment, and the names of variables whose values are
     secrets: those are passed to ``docker run`` by name (``-e NAME``) so the
     value never appears on a logged command line.
 
-    Embeddings always go through the gateway: the cached index was built with
-    ``EMBED``, and queries must be embedded the same way."""
+    Chat calls always go through the gateway as ``model``. Embeddings do too
+    unless ``embedding`` routes them straight to a provider: the cached index
+    was built with ``EMBED``, and queries must be embedded the same way."""
     inference = f"{docker_gateway(gateway)}/__tag/ingest/cortex/v1"
-    chat_url, chat_model = (memory.url, memory.model) if memory else (inference, MODEL)
     env = {
         "CORTEX_API_KEY": "lme2-local", "CORTEX_DEPLOYMENT_PRESET": "dev_local",
-        "CORTEX_EMBEDDING_URL": inference, "CORTEX_EMBEDDING_API_KEY": "dummy", "CORTEX_EMBEDDING_MODEL": EMBED,
-        "CORTEX_EMBEDDING_DIMS": "1536", "CORTEX_LLM_URL": chat_url,
-        "CORTEX_LLM_MODEL": chat_model, "CORTEX_ENRICHMENT_URL": chat_url,
-        "CORTEX_ENRICHMENT_MODEL": chat_model, "CORTEX_ENRICHMENT_DELAY_SECONDS": "0",
-        "CORTEX_ANSWER_PROVIDER": "openai", "CORTEX_ANSWER_URL": chat_url,
-        "CORTEX_ANSWER_MODEL": chat_model, "CORTEX_VERIFIER_URL": chat_url,
-        "CORTEX_VERIFIER_MODEL": chat_model, "CORTEX_VERIFIER_MAX_TOKENS": "4096",
+        "CORTEX_EMBEDDING_URL": embedding.url if embedding else inference,
+        "CORTEX_EMBEDDING_MODEL": EMBED, "CORTEX_EMBEDDING_DIMS": "1536",
+        "OPENAI_API_KEY": "dummy", "CORTEX_ENTITY_API_KEY": "dummy",
+        "CORTEX_LLM_URL": inference, "CORTEX_LLM_MODEL": model,
+        "CORTEX_ENRICHMENT_URL": inference, "CORTEX_ENRICHMENT_API_KEY": "dummy",
+        "CORTEX_ENRICHMENT_MODEL": model, "CORTEX_ENRICHMENT_DELAY_SECONDS": "0",
+        "CORTEX_ANSWER_PROVIDER": "openai", "CORTEX_ANSWER_URL": inference, "CORTEX_ANSWER_API_KEY": "dummy",
+        "CORTEX_ANSWER_MODEL": model, "CORTEX_VERIFIER_URL": inference, "CORTEX_VERIFIER_API_KEY": "dummy",
+        "CORTEX_VERIFIER_MODEL": model, "CORTEX_VERIFIER_MAX_TOKENS": "4096",
         "CORTEX_V1_LAYERS_AUTO": "1", "CORTEX_AUTO_ROUTE": "1", "CORTEX_CONSOLIDATION_MIN_AGE_HOURS": "0",
         **CORTEX_INGEST_ENV,
     }
-    if memory:
-        return env, list(CHAT_KEY_VARS)
-    env.update({name: "dummy" for name in CHAT_KEY_VARS})
+    if embedding:
+        return env, ["CORTEX_EMBEDDING_API_KEY"]
+    env["CORTEX_EMBEDDING_API_KEY"] = "dummy"
     return env, []
 
 
-def start_cortex(name: str, data_dir: pathlib.Path, gateway: str, memory: "MemoryLlm | None", log: Log) -> str:
-    env, secrets = cortex_env(gateway, memory)
+def start_cortex(name: str, data_dir: pathlib.Path, gateway: str, model: str,
+                 embedding: "EmbeddingRoute | None", log: Log) -> str:
+    env, secrets = cortex_env(gateway, model, embedding)
     client_env = dict(os.environ)
-    if memory:
-        key = os.environ.get(memory.key_env)
+    if embedding:
+        key = os.environ.get(embedding.key_env)
         if not key:
-            raise RuntimeError(f"{memory.key_env} is not set; add it to rsi.json's keys")
+            raise RuntimeError(f"{embedding.key_env} is not set; add it to rsi.json's keys")
         client_env.update({var: key for var in secrets})
     subprocess.run(["docker", "rm", "-f", name], capture_output=True)
     # CortexDB keeps all of its state (WAL, HNSW, facts, snapshots) under its
@@ -431,7 +432,7 @@ def main(argv: list[str] | None = None) -> None:
                 run(["cp", "-cR", cache / "cortex-data", data_dir], log)
             else:
                 data_dir.mkdir(parents=True)
-            env["CORTEX_DB_URL"] = start_cortex(cortex_name, data_dir, args.gateway, memory_llm(os.environ), log)
+            env["CORTEX_DB_URL"] = start_cortex(cortex_name, data_dir, args.gateway, model, embedding_route(os.environ), log)
             env["CORTEX_API_KEY"] = "lme2-local"
         memd_log = (out / "memd.log").open("w")
         memd_proc = subprocess.Popen([memd, "--engine", args.engine, "--namespace", f"lme2-{subset['domain']}"],
