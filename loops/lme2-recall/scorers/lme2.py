@@ -119,6 +119,31 @@ def tree_digest(paths: list[pathlib.Path]) -> str:
     return h.hexdigest()
 
 
+# sccache starts its server with a Unix socket under TMPDIR; a socket path
+# longer than 104 bytes (macOS SUN_LEN) fails the build.
+MAX_BUILD_TMPDIR = 60
+
+
+def short_tmpdir() -> str:
+    """The user's own temp folder on macOS (``getconf DARWIN_USER_TEMP_DIR``),
+    else ``/tmp``."""
+    try:
+        found = subprocess.run(["getconf", "DARWIN_USER_TEMP_DIR"], capture_output=True, text=True).stdout.strip()
+    except OSError:
+        found = ""
+    return found or "/tmp"
+
+
+def build_env(environ: dict, short_tmp: str) -> dict:
+    """``environ`` with a ``TMPDIR`` short enough for sccache's socket: a
+    tinyrsi step's temp folder (under the run store) is replaced by
+    ``short_tmp``. Only the socket goes there, never build output."""
+    env = dict(environ)
+    if len(env.get("TMPDIR", "")) > MAX_BUILD_TMPDIR:
+        env["TMPDIR"] = short_tmp
+    return env
+
+
 def build_memd(tinymemory: pathlib.Path, out_dir: pathlib.Path, log: Log) -> pathlib.Path:
     tm = (tinymemory / "crates").resolve()
     manifest = (MEMD_SRC / "Cargo.toml").read_text(encoding="utf-8")
@@ -132,7 +157,8 @@ def build_memd(tinymemory: pathlib.Path, out_dir: pathlib.Path, log: Log) -> pat
         shutil.copy(lock, build_dir / "Cargo.lock")
     target = ROOT / "target/memd"
     with (out_dir / "memd-build.log").open("w") as out:
-        run(["cargo", "build", "--manifest-path", build_dir / "Cargo.toml", "--target-dir", target], log, stdout=out, stderr=subprocess.STDOUT)
+        run(["cargo", "build", "--manifest-path", build_dir / "Cargo.toml", "--target-dir", target], log, stdout=out,
+            stderr=subprocess.STDOUT, env=build_env(dict(os.environ), short_tmpdir()))
     binary = out_dir / "lme2-memd"
     shutil.copy(target / "debug/lme2-memd", binary)
     return binary
