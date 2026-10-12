@@ -321,6 +321,22 @@ def subset_inputs(subset: dict, limit: int | None, out: pathlib.Path) -> tuple[p
     return qpath, hpath, {qid: split for qid, (split, _) in wanted.items()}
 
 
+def average_repeats(runs: list[list[dict]]) -> list[dict]:
+    """One record per question with its ``score`` averaged over ``runs``
+    (repeated harness runs over the same questions); every other field comes
+    from the first run."""
+    if len(runs) == 1:
+        return runs[0]
+    by_run = [{r["question_id"]: r for r in run} for run in runs]
+    if any(set(scores) != set(by_run[0]) for scores in by_run[1:]):
+        raise RuntimeError("repeated harness runs scored different questions")
+    merged = []
+    for record in runs[0]:
+        qid = record["question_id"]
+        merged.append({**record, "score": sum(run[qid]["score"] for run in by_run) / len(by_run)})
+    return merged
+
+
 def summarize(records: list[dict], splits: dict) -> tuple[dict, list[dict]]:
     """Per-split accuracy and the dev failures, from the harness's per-question rows.
 
@@ -404,6 +420,32 @@ def build_result(summary: dict, failures: list[dict]) -> dict:
     }
 
 
+def run_harness(out: pathlib.Path, harness_out: pathlib.Path, config_path: pathlib.Path, mounts: list[str],
+                qpath: pathlib.Path, hpath: pathlib.Path, subset: dict, model: str, args: argparse.Namespace,
+                log: Log) -> None:
+    """One run of the unmodified official harness in its container, its log
+    appended to ``harness.log``."""
+    gw = docker_gateway(args.gateway)
+    cmd = [
+        "docker", "run", "--rm", "--add-host", "host.docker.internal:host-gateway",
+        *mounts, "-w", str(ROOT),
+        "-e", "OPENAI_API_KEY=dummy", "-e", f"HF_HOME={BENCH / '.cache/hf'}",
+        HARNESS_IMAGE, str(VENV_PY), str(ROOT / "adapters/lme2/run_harness.py"), str(OFFICIAL),
+        "--domain", subset["domain"], "--questions-path", str(qpath), "--haystack-path", str(hpath),
+        "--trajectories-path", str(DATA / "trajectories.jsonl"), "--memory-config-path", str(config_path),
+        "--output-dir", str(harness_out), "--model", model, "--base-url", f"{gw}/__tag/reader/harness/v1",
+        "--max-completion-tokens", "4096", "--reader-max-concurrent-requests", str(args.concurrency),
+        "--reasoning-effort", "low", "--timeout-seconds", "600",
+        "--evaluator-model", model, "--evaluator-base-url", f"{gw}/__tag/judge/harness/v1",
+        "--evaluator-reasoning-effort", "low", "--evaluator-max-completion-tokens", "2048",
+        "--evaluator-timeout-seconds", "600",
+    ]
+    with (out / "harness.log").open("a") as hl:
+        hl.write(f"=== {harness_out.name}\n")
+        hl.flush()
+        run(cmd, log, stdout=hl, stderr=subprocess.STDOUT)
+
+
 def env_int(name: str) -> int | None:
     value = os.environ.get(name, "").strip()
     return int(value) if value else None
@@ -419,6 +461,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--engine", choices=["cortex", "reference"], default=os.environ.get("LME2_ENGINE") or "cortex")
     parser.add_argument("--limit", type=int, default=env_int("LME2_LIMIT"), help="first N questions of each split (smoke runs)")
     parser.add_argument("--concurrency", type=int, default=env_int("LME2_CONCURRENCY") or 8)
+    parser.add_argument("--repeats", type=int, default=env_int("LME2_REPEATS") or 1,
+                        help="harness runs to average each question's score over (default: $LME2_REPEATS, else 1)")
     args = parser.parse_args(argv)
     if not args.out:
         parser.error("--out or $RSI_OUT is required")
@@ -471,8 +515,6 @@ def main(argv: list[str] | None = None) -> None:
         memd_url = line.removeprefix("listening on ")
         log(f"memd at {memd_url}")
 
-        config = {"memory_type": "oh_tinymemory", "memory_params": {"memd_url": docker_gateway(memd_url), "skip_insert": hit}}
-        (out / "memory_config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
         harness_out = out / "harness"
         shutil.rmtree(harness_out, ignore_errors=True)
         gw = docker_gateway(args.gateway)
@@ -480,22 +522,13 @@ def main(argv: list[str] | None = None) -> None:
         mounts = ["-v", f"{MOUNT_ROOT}:{MOUNT_ROOT}"]
         if not out.is_relative_to(MOUNT_ROOT):
             mounts += ["-v", f"{out}:{out}"]
-        cmd = [
-            "docker", "run", "--rm", "--add-host", "host.docker.internal:host-gateway",
-            *mounts, "-w", str(ROOT),
-            "-e", "OPENAI_API_KEY=dummy", "-e", f"HF_HOME={BENCH / '.cache/hf'}",
-            HARNESS_IMAGE, str(VENV_PY), str(ROOT / "adapters/lme2/run_harness.py"), str(OFFICIAL),
-            "--domain", subset["domain"], "--questions-path", str(qpath), "--haystack-path", str(hpath),
-            "--trajectories-path", str(DATA / "trajectories.jsonl"), "--memory-config-path", str(out / "memory_config.json"),
-            "--output-dir", str(harness_out), "--model", model, "--base-url", f"{gw}/__tag/reader/harness/v1",
-            "--max-completion-tokens", "4096", "--reader-max-concurrent-requests", str(args.concurrency),
-            "--reasoning-effort", "low", "--timeout-seconds", "600",
-            "--evaluator-model", model, "--evaluator-base-url", f"{gw}/__tag/judge/harness/v1",
-            "--evaluator-reasoning-effort", "low", "--evaluator-max-completion-tokens", "2048",
-            "--evaluator-timeout-seconds", "600",
-        ]
-        with (out / "harness.log").open("w") as hl:
-            run(cmd, log, stdout=hl, stderr=subprocess.STDOUT)
+        for repeat in range(1, args.repeats + 1):
+            # Only the first run may insert; later runs read the same memory.
+            config = {"memory_type": "oh_tinymemory",
+                      "memory_params": {"memd_url": docker_gateway(memd_url), "skip_insert": hit or repeat > 1}}
+            config_path = out / f"memory_config-{repeat}.json"
+            config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+            run_harness(out, harness_out / f"r{repeat}", config_path, mounts, qpath, hpath, subset, model, args, log)
         memd_log.flush()
         drained = hit and drained_on_restore((out / "memd.log").read_text(encoding="utf-8", errors="replace"))
         if args.engine == "cortex" and (not hit or drained):
@@ -517,8 +550,11 @@ def main(argv: list[str] | None = None) -> None:
         else:
             log(f"evaluation failed; keeping {out / 'cortex-data'} for lme2_snapshot.py")
 
-    per_question = next(harness_out.rglob("per_question.jsonl"))
-    records = [json.loads(l) for l in per_question.read_text(encoding="utf-8").splitlines() if l.strip()]
+    runs = []
+    for repeat in range(1, args.repeats + 1):
+        per_question = next((harness_out / f"r{repeat}").rglob("per_question.jsonl"))
+        runs.append([json.loads(l) for l in per_question.read_text(encoding="utf-8").splitlines() if l.strip()])
+    records = average_repeats(runs)
     summary, failures = summarize(records, splits)
     with (out / "dev_failures.jsonl").open("w", encoding="utf-8") as f:
         for row in failures:
@@ -526,7 +562,7 @@ def main(argv: list[str] | None = None) -> None:
     head = subprocess.run(["git", "-C", str(tinymemory), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     dirty = bool(subprocess.run(["git", "-C", str(tinymemory), "status", "--porcelain"], capture_output=True, text=True).stdout.strip())
     summary.update({"label": args.label, "model": model, "checkout": str(tinymemory), "ingest_cache": key, "ingest_cache_hit": hit,
-                    "tinymemory_head": head, "tinymemory_dirty": dirty, "limit": args.limit})
+                    "tinymemory_head": head, "tinymemory_dirty": dirty, "limit": args.limit, "repeats": args.repeats})
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     (out / "result.json").write_text(json.dumps(build_result(summary, failures), indent=2) + "\n", encoding="utf-8")
     for split in ("dev", "test"):
