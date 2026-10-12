@@ -174,3 +174,19 @@ class CortexEnvTest(unittest.TestCase):
             lme2.EmbeddingRoute("https://e/v1", "K"))
         with self.assertRaises(ValueError):
             lme2.embedding_route({"LME2_EMBEDDING_URL": "https://e/v1"})
+
+
+class BuildEnvTest(unittest.TestCase):
+    """The memd build runs with a short ``TMPDIR``: sccache puts its server
+    socket there, and a tinyrsi step's own temp folder is too long for a Unix
+    socket path."""
+
+    def test_a_long_step_tmpdir_is_replaced_by_a_short_one(self) -> None:
+        long_tmp = "/Users/someone/.tinyrsi/runs/lme2-recall/score-incumbent-20261012-002157/steps/score.lme2.0/tmp"
+        env = lme2.build_env({"PATH": "/bin", "TMPDIR": long_tmp}, short_tmp="/var/folders/x/T/")
+        self.assertEqual(env["TMPDIR"], "/var/folders/x/T/")
+        self.assertEqual(env["PATH"], "/bin")
+
+    def test_a_short_tmpdir_is_kept(self) -> None:
+        env = lme2.build_env({"TMPDIR": "/tmp/x"}, short_tmp="/var/folders/x/T/")
+        self.assertEqual(env["TMPDIR"], "/tmp/x")
