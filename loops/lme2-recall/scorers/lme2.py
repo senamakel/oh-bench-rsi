@@ -22,10 +22,13 @@ for a smoke run). Steps, each logged to ``<out>/eval.log``:
    CortexDB image and config) are unchanged; otherwise it ingests and the
    result is cached for later candidates. A restored ingest that still had
    enrichment queued replaces the cache once it has settled.
-3. Run the unmodified official harness in its Linux container with the
+3. Run the unmodified official harness ``--repeats`` times (``LME2_REPEATS``)
+   in its Linux container with the
    ``oh_tinymemory`` backend, GLM 5.3 Flash as reader and judge, both
    through the gateway (``/__tag/reader/harness``, ``/__tag/judge/harness``).
-4. Score per split and write ``summary.json``, ``dev_failures.jsonl`` (dev
+4. Average each question's score over the repeats (a router that mixes
+   reader and judge models flips single answers between runs), score per
+   split and write ``summary.json``, ``dev_failures.jsonl`` (dev
    only: question, the model's answer, verdict, retrieved pack — never the
    gold answer), ``result.json`` for tinyrsi, and print
    ``METRIC lme2_<split>_accuracy=<x>`` lines.
@@ -517,7 +520,6 @@ def main(argv: list[str] | None = None) -> None:
 
         harness_out = out / "harness"
         shutil.rmtree(harness_out, ignore_errors=True)
-        gw = docker_gateway(args.gateway)
         # tinyrsi's step folder lives in its run store, outside the checkout.
         mounts = ["-v", f"{MOUNT_ROOT}:{MOUNT_ROOT}"]
         if not out.is_relative_to(MOUNT_ROOT):

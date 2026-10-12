@@ -93,6 +93,14 @@ The scorer gives it to `docker run` by name, so it never appears on a logged
 command line. These calls cost about $0.005 per score and are not metered by
 the gateway.
 
+## Repeated scoring
+
+The ladder's `flash` rung serves whichever model is available: GLM 5.3 Flash,
+deepseek, gpt-luna. An A/A test scored the same TinyMemory 0.307 and then
+0.120 on dev an hour apart. So each score runs the harness `LME2_REPEATS`
+times (3 in `rsi.json`) over the same memory and averages every question's
+score; the sign test then compares those means per question.
+
 ## Tuning with `env`
 
 Step commands see only `PATH`, `HOME`, `TMPDIR`, the `RSI_*` variables and
@@ -104,6 +112,7 @@ embedding route (see above); the measurement uses the frozen defaults. For a loc
 | `LME2_LIMIT` | unset (all 225) | Score only the first N questions of each split |
 | `LME2_ENGINE` | `cortex` | `reference` uses tinymemory-api's in-memory conformance engine (no CortexDB) |
 | `LME2_CONCURRENCY` | `8` | Reader concurrency in the harness |
+| `LME2_REPEATS` | `1` (`3` in `rsi.json`) | Harness runs per score; each question scores the mean over them, so per-item scores are fractional |
 | `MEMD_SETTLE_SECS` | `10800` | How long memd waits for CortexDB enrichment to settle |
 | `LME2_MOUNT_ROOT` | the primary checkout | Path mounted into the harness container |
 
