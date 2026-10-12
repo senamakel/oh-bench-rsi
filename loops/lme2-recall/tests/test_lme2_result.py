@@ -190,3 +190,33 @@ class BuildEnvTest(unittest.TestCase):
     def test_a_short_tmpdir_is_kept(self) -> None:
         env = lme2.build_env({"TMPDIR": "/tmp/x"}, short_tmp="/var/folders/x/T/")
         self.assertEqual(env["TMPDIR"], "/tmp/x")
+
+
+class RepeatsTest(unittest.TestCase):
+    """Scores from repeated harness runs are averaged per question: a router
+    that mixes reader and judge models flips single answers between runs."""
+
+    def test_each_question_scores_the_mean_of_its_repeats(self) -> None:
+        first = [{"question_id": "q1", "score": 1, "response_parsed_boxed": "a"},
+                 {"question_id": "q2", "score": 0, "response_parsed_boxed": "b"}]
+        second = [{"question_id": "q2", "score": 1, "response_parsed_boxed": "c"},
+                  {"question_id": "q1", "score": 1, "response_parsed_boxed": "d"}]
+        third = [{"question_id": "q1", "score": 0}, {"question_id": "q2", "score": 0}]
+        merged = {r["question_id"]: r for r in lme2.average_repeats([first, second, third])}
+        self.assertAlmostEqual(merged["q1"]["score"], 2 / 3)
+        self.assertAlmostEqual(merged["q2"]["score"], 1 / 3)
+        self.assertEqual(merged["q1"]["response_parsed_boxed"], "a")
+
+    def test_one_repeat_is_unchanged(self) -> None:
+        only = [{"question_id": "q1", "score": 1}]
+        self.assertEqual(lme2.average_repeats([only]), only)
+
+    def test_repeats_must_cover_the_same_questions(self) -> None:
+        with self.assertRaises(RuntimeError):
+            lme2.average_repeats([[{"question_id": "q1", "score": 1}], [{"question_id": "q2", "score": 1}]])
+
+    def test_a_failure_is_a_question_that_was_not_always_right(self) -> None:
+        records = [{"question_id": "d1", "question_type": "t", "score": 2 / 3, "question_text": "q",
+                    "response_parsed_boxed": "x", "is_unknown": False, "memory_context": []}]
+        _, failures = lme2.summarize(records, {"d1": "dev"})
+        self.assertEqual([f["question_id"] for f in failures], ["d1"])
